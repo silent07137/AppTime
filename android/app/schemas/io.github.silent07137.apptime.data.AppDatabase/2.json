@@ -1,0 +1,663 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "6ab269e8b8aed97cf66d81d3c054d5b3",
+    "entities": [
+      {
+        "tableName": "devices",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`deviceId` TEXT NOT NULL, `platform` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `reportTimezone` TEXT NOT NULL, PRIMARY KEY(`deviceId`))",
+        "fields": [
+          {
+            "fieldPath": "deviceId",
+            "columnName": "deviceId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "platform",
+            "columnName": "platform",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reportTimezone",
+            "columnName": "reportTimezone",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "deviceId"
+          ]
+        }
+      },
+      {
+        "tableName": "app_identities",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`identityId` TEXT NOT NULL, `deviceId` TEXT NOT NULL, `profileScope` TEXT NOT NULL, `packageName` TEXT NOT NULL, `displayName` TEXT NOT NULL, PRIMARY KEY(`identityId`), FOREIGN KEY(`deviceId`) REFERENCES `devices`(`deviceId`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "identityId",
+            "columnName": "identityId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceId",
+            "columnName": "deviceId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "profileScope",
+            "columnName": "profileScope",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "packageName",
+            "columnName": "packageName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "displayName",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "identityId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_app_identities_deviceId_profileScope_packageName",
+            "unique": true,
+            "columnNames": [
+              "deviceId",
+              "profileScope",
+              "packageName"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_app_identities_deviceId_profileScope_packageName` ON `${TABLE_NAME}` (`deviceId`, `profileScope`, `packageName`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "devices",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "deviceId"
+            ],
+            "referencedColumns": [
+              "deviceId"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "sessions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`sessionId` TEXT NOT NULL, `originDeviceId` TEXT NOT NULL, `identityId` TEXT NOT NULL, `anchorMs` INTEGER NOT NULL, `startMs` INTEGER NOT NULL, `endMs` INTEGER NOT NULL, `durationMs` INTEGER NOT NULL, `timezone` TEXT NOT NULL, `utcOffsetSeconds` INTEGER NOT NULL, `metric` TEXT NOT NULL, `source` TEXT NOT NULL, `provisional` INTEGER NOT NULL, `transitionEstimated` INTEGER NOT NULL, `quality` TEXT NOT NULL, `revision` INTEGER NOT NULL, `deleted` INTEGER NOT NULL, PRIMARY KEY(`sessionId`), FOREIGN KEY(`identityId`) REFERENCES `app_identities`(`identityId`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`originDeviceId`) REFERENCES `devices`(`deviceId`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "sessionId",
+            "columnName": "sessionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "originDeviceId",
+            "columnName": "originDeviceId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "identityId",
+            "columnName": "identityId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "anchorMs",
+            "columnName": "anchorMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startMs",
+            "columnName": "startMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endMs",
+            "columnName": "endMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "durationMs",
+            "columnName": "durationMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timezone",
+            "columnName": "timezone",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "utcOffsetSeconds",
+            "columnName": "utcOffsetSeconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "metric",
+            "columnName": "metric",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "provisional",
+            "columnName": "provisional",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "transitionEstimated",
+            "columnName": "transitionEstimated",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "quality",
+            "columnName": "quality",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "revision",
+            "columnName": "revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deleted",
+            "columnName": "deleted",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "sessionId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sessions_identityId_startMs_endMs",
+            "unique": false,
+            "columnNames": [
+              "identityId",
+              "startMs",
+              "endMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sessions_identityId_startMs_endMs` ON `${TABLE_NAME}` (`identityId`, `startMs`, `endMs`)"
+          },
+          {
+            "name": "index_sessions_originDeviceId",
+            "unique": false,
+            "columnNames": [
+              "originDeviceId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sessions_originDeviceId` ON `${TABLE_NAME}` (`originDeviceId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "app_identities",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "identityId"
+            ],
+            "referencedColumns": [
+              "identityId"
+            ]
+          },
+          {
+            "table": "devices",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "originDeviceId"
+            ],
+            "referencedColumns": [
+              "deviceId"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "daily_usage",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`identityId` TEXT NOT NULL, `reportDate` TEXT NOT NULL, `timezone` TEXT NOT NULL, `durationMs` INTEGER NOT NULL, `quality` TEXT NOT NULL, PRIMARY KEY(`identityId`, `reportDate`), FOREIGN KEY(`identityId`) REFERENCES `app_identities`(`identityId`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "identityId",
+            "columnName": "identityId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reportDate",
+            "columnName": "reportDate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timezone",
+            "columnName": "timezone",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "durationMs",
+            "columnName": "durationMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "quality",
+            "columnName": "quality",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "identityId",
+            "reportDate"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_daily_usage_reportDate",
+            "unique": false,
+            "columnNames": [
+              "reportDate"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_daily_usage_reportDate` ON `${TABLE_NAME}` (`reportDate`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "app_identities",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "identityId"
+            ],
+            "referencedColumns": [
+              "identityId"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "collection_state",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`source` TEXT NOT NULL, `recordFromMs` INTEGER NOT NULL, `checkpointMs` INTEGER, `lastSuccessMs` INTEGER, `enabled` INTEGER NOT NULL, `status` TEXT NOT NULL, `detail` TEXT NOT NULL, PRIMARY KEY(`source`))",
+        "fields": [
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recordFromMs",
+            "columnName": "recordFromMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "checkpointMs",
+            "columnName": "checkpointMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastSuccessMs",
+            "columnName": "lastSuccessMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "enabled",
+            "columnName": "enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "detail",
+            "columnName": "detail",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "source"
+          ]
+        }
+      },
+      {
+        "tableName": "coverage",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`coverageId` TEXT NOT NULL, `deviceId` TEXT NOT NULL, `startMs` INTEGER NOT NULL, `endMs` INTEGER NOT NULL, `status` TEXT NOT NULL, `reason` TEXT NOT NULL, PRIMARY KEY(`coverageId`), FOREIGN KEY(`deviceId`) REFERENCES `devices`(`deviceId`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "coverageId",
+            "columnName": "coverageId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceId",
+            "columnName": "deviceId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startMs",
+            "columnName": "startMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endMs",
+            "columnName": "endMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reason",
+            "columnName": "reason",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "coverageId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_coverage_startMs_endMs",
+            "unique": false,
+            "columnNames": [
+              "startMs",
+              "endMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_coverage_startMs_endMs` ON `${TABLE_NAME}` (`startMs`, `endMs`)"
+          },
+          {
+            "name": "index_coverage_deviceId",
+            "unique": false,
+            "columnNames": [
+              "deviceId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_coverage_deviceId` ON `${TABLE_NAME}` (`deviceId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "devices",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "deviceId"
+            ],
+            "referencedColumns": [
+              "deviceId"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "historical_buckets",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`bucketId` TEXT NOT NULL, `originDeviceId` TEXT NOT NULL, `identityId` TEXT NOT NULL, `startMs` INTEGER NOT NULL, `endMs` INTEGER NOT NULL, `usageMs` INTEGER NOT NULL, `source` TEXT NOT NULL, `timezone` TEXT NOT NULL, `quality` TEXT NOT NULL, `revision` INTEGER NOT NULL, PRIMARY KEY(`bucketId`), FOREIGN KEY(`originDeviceId`) REFERENCES `devices`(`deviceId`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`identityId`) REFERENCES `app_identities`(`identityId`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "bucketId",
+            "columnName": "bucketId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "originDeviceId",
+            "columnName": "originDeviceId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "identityId",
+            "columnName": "identityId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startMs",
+            "columnName": "startMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endMs",
+            "columnName": "endMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "usageMs",
+            "columnName": "usageMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timezone",
+            "columnName": "timezone",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "quality",
+            "columnName": "quality",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "revision",
+            "columnName": "revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "bucketId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_historical_buckets_originDeviceId_identityId_source_startMs",
+            "unique": true,
+            "columnNames": [
+              "originDeviceId",
+              "identityId",
+              "source",
+              "startMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_historical_buckets_originDeviceId_identityId_source_startMs` ON `${TABLE_NAME}` (`originDeviceId`, `identityId`, `source`, `startMs`)"
+          },
+          {
+            "name": "index_historical_buckets_identityId_startMs_endMs",
+            "unique": false,
+            "columnNames": [
+              "identityId",
+              "startMs",
+              "endMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_historical_buckets_identityId_startMs_endMs` ON `${TABLE_NAME}` (`identityId`, `startMs`, `endMs`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "devices",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "originDeviceId"
+            ],
+            "referencedColumns": [
+              "deviceId"
+            ]
+          },
+          {
+            "table": "app_identities",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "identityId"
+            ],
+            "referencedColumns": [
+              "identityId"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "history_import_state",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`source` TEXT NOT NULL, `requestedStartMs` INTEGER NOT NULL, `requestedEndMs` INTEGER NOT NULL, `returnedStartMs` INTEGER, `returnedEndMs` INTEGER, `acceptedBuckets` INTEGER NOT NULL, `skippedBuckets` INTEGER NOT NULL, `lastAttemptMs` INTEGER NOT NULL, `status` TEXT NOT NULL, `detail` TEXT NOT NULL, PRIMARY KEY(`source`))",
+        "fields": [
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "requestedStartMs",
+            "columnName": "requestedStartMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "requestedEndMs",
+            "columnName": "requestedEndMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "returnedStartMs",
+            "columnName": "returnedStartMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "returnedEndMs",
+            "columnName": "returnedEndMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "acceptedBuckets",
+            "columnName": "acceptedBuckets",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "skippedBuckets",
+            "columnName": "skippedBuckets",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastAttemptMs",
+            "columnName": "lastAttemptMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "detail",
+            "columnName": "detail",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "source"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '6ab269e8b8aed97cf66d81d3c054d5b3')"
+    ]
+  }
+}

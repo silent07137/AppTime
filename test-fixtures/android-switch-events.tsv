@@ -1,0 +1,7 @@
+time_ms	kind	package_name	component
+0	RESUME	app.a	Main#1
+60000	PAUSE	app.a	Main#1
+60000	RESUME	app.b	Main#2
+90000	PAUSE	app.b	Main#2
+90000	RESUME	app.a	Main#3
+100000	PAUSE	app.a	Main#3
