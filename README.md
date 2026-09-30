@@ -34,7 +34,7 @@ adb shell am instrument -w -r io.github.silent07137.apptime.test/androidx.test.r
 
 macOS/Linux 使用 `./gradlew`。直接 ADB 测试可保留目标应用数据；Gradle `connectedDebugAndroidTest` 的设备清理可能卸载目标应用，只应在可重置设备执行。见 [验证说明](docs/TESTING.md)。
 
-发布构建启用代码与资源压缩，通过 `APPTIME_SIGNING_PROPERTIES` 读取仓库外签名配置；无配置时构建未签名包。见 [签名与发布](docs/RELEASING.md)。`:app:assemblePreview` 使用本机调试签名，只供开发验证。
+发布构建启用代码与资源压缩，通过 `APPTIME_SIGNING_PROPERTIES` 读取仓库外签名配置。构建后运行 `android/sign-release.ps1` 生成含公开证书轮换证明的最终 APK；无配置时 Gradle 构建未签名包。见 [签名与发布](docs/RELEASING.md)。`:app:assemblePreview` 使用本机调试签名，只供开发验证。
 
 ## 已知限制与后续阶段
 
