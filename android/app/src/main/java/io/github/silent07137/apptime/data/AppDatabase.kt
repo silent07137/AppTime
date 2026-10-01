@@ -30,6 +30,18 @@ data class SessionEntity(
     foreignKeys = [ForeignKey(entity = IdentityEntity::class, parentColumns = ["identityId"], childColumns = ["identityId"], onDelete = ForeignKey.RESTRICT)], indices = [Index("reportDate")])
 data class DailyEntity(val identityId: String, val reportDate: String, val timezone: String, val durationMs: Long, val quality: String = "partial")
 
+@Entity(tableName = "event_daily_usage", primaryKeys = ["identityId", "reportDate"],
+    foreignKeys = [ForeignKey(entity = IdentityEntity::class, parentColumns = ["identityId"], childColumns = ["identityId"], onDelete = ForeignKey.RESTRICT)], indices = [Index("reportDate")])
+data class EventDailyEntity(val identityId: String, val reportDate: String, val timezone: String, val durationMs: Long)
+
+@Entity(tableName = "system_daily_usage", primaryKeys = ["identityId", "reportDate"],
+    foreignKeys = [ForeignKey(entity = IdentityEntity::class, parentColumns = ["identityId"], childColumns = ["identityId"], onDelete = ForeignKey.RESTRICT)], indices = [Index("reportDate")])
+data class SystemDailyEntity(val identityId: String, val reportDate: String, val timezone: String, val durationMs: Long,
+    val bucketStartMs: Long, val bucketEndMs: Long, val observedAtMs: Long)
+
+@Entity(tableName = "daily_sync_state")
+data class DailySyncState(@PrimaryKey val id: Int = 1, val initialDone: Boolean = false, val eventRebuilt: Boolean = false, val lastAttemptMs: Long? = null)
+
 @Entity(tableName = "collection_state")
 data class CollectionState(@PrimaryKey val source: String = "android_usage_events", val recordFromMs: Long, val checkpointMs: Long? = null,
     val lastSuccessMs: Long? = null, val enabled: Boolean = false, val status: String = "未采集", val detail: String = "等待使用情况访问授权")
@@ -51,8 +63,8 @@ data class HistoryImportState(@PrimaryKey val source: String = "android_usage_st
     val returnedStartMs: Long? = null, val returnedEndMs: Long? = null, val acceptedBuckets: Int = 0, val skippedBuckets: Int = 0,
     val lastAttemptMs: Long, val status: String, val detail: String)
 
-data class AppSummary(val identityId: String, val packageName: String, val displayName: String, val durationMs: Long, val historicalMs: Long, val historicalBuckets: Int, val firstMs: Long?, val lastMs: Long?)
-data class DaySummary(val reportDate: String, val durationMs: Long)
+data class AppSummary(val identityId: String, val packageName: String, val displayName: String, val durationMs: Long, val recordedMs: Long, val historicalMs: Long, val historicalBuckets: Int, val firstMs: Long?, val lastMs: Long?)
+data class DaySummary(val reportDate: String, val durationMs: Long, val source: String)
 
 @Dao
 interface UsageDao {
@@ -82,6 +94,14 @@ interface UsageDao {
     @Query("DELETE FROM daily_usage WHERE identityId = :id AND reportDate >= :fromDate AND reportDate <= :toDate")
     suspend fun clearDays(id: String, fromDate: String, toDate: String)
     @Upsert suspend fun saveDays(days: List<DailyEntity>)
+    @Query("DELETE FROM event_daily_usage WHERE identityId = :id AND reportDate >= :fromDate AND reportDate <= :toDate")
+    suspend fun clearEventDays(id: String, fromDate: String, toDate: String)
+    @Upsert suspend fun saveEventDays(days: List<EventDailyEntity>)
+    @Query("SELECT * FROM sessions WHERE deleted = 0 ORDER BY identityId, startMs") suspend fun allSessions(): List<SessionEntity>
+    @Query("SELECT * FROM daily_sync_state WHERE id = 1") suspend fun dailySyncState(): DailySyncState?
+    @Upsert suspend fun saveDailySyncState(state: DailySyncState)
+    @Query("SELECT * FROM system_daily_usage WHERE identityId = :id AND reportDate = :date") suspend fun systemDay(id: String, date: String): SystemDailyEntity?
+    @Upsert suspend fun saveSystemDays(days: List<SystemDailyEntity>)
     @Query("""WITH effective_history AS (
         SELECT h.* FROM historical_buckets h WHERE NOT EXISTS (
             SELECT 1 FROM historical_buckets o WHERE o.identityId = h.identityId AND o.bucketId != h.bucketId
@@ -90,19 +110,30 @@ interface UsageDao {
                 (o.source = 'android_usage_stats_best' AND h.source != 'android_usage_stats_best'))))
         SELECT i.identityId, i.packageName, i.displayName,
         COALESCE((SELECT SUM(d.durationMs) FROM daily_usage d WHERE d.identityId = i.identityId), 0) AS durationMs,
+        COALESCE((SELECT SUM(e.durationMs) FROM event_daily_usage e WHERE e.identityId = i.identityId), 0) AS recordedMs,
         COALESCE((SELECT SUM(h.usageMs) FROM effective_history h WHERE h.identityId = i.identityId), 0) AS historicalMs,
         (SELECT COUNT(*) FROM effective_history h WHERE h.identityId = i.identityId) AS historicalBuckets,
         (SELECT MIN(s.startMs) FROM sessions s WHERE s.identityId = i.identityId AND s.deleted = 0) AS firstMs,
         (SELECT MAX(s.endMs) FROM sessions s WHERE s.identityId = i.identityId AND s.deleted = 0) AS lastMs
         FROM app_identities i ORDER BY durationMs + historicalMs DESC, i.packageName""")
     fun observeApps(): Flow<List<AppSummary>>
-    @Query("SELECT reportDate, SUM(durationMs) AS durationMs FROM daily_usage WHERE reportDate >= :fromDate GROUP BY reportDate ORDER BY reportDate DESC")
+    @Query("""WITH combined AS (
+        SELECT identityId, reportDate, durationMs, 'system' AS source FROM system_daily_usage WHERE reportDate >= :fromDate
+        UNION ALL
+        SELECT e.identityId, e.reportDate, e.durationMs, 'events' AS source FROM event_daily_usage e
+        WHERE e.reportDate >= :fromDate AND NOT EXISTS (SELECT 1 FROM system_daily_usage s WHERE s.identityId = e.identityId AND s.reportDate = e.reportDate)
+    ) SELECT reportDate, SUM(durationMs) AS durationMs,
+        CASE WHEN COUNT(DISTINCT source) > 1 THEN 'mixed' ELSE MIN(source) END AS source
+        FROM combined GROUP BY reportDate ORDER BY reportDate DESC""")
     fun observeDays(fromDate: String): Flow<List<DaySummary>>
-    @Query("SELECT reportDate, durationMs FROM daily_usage WHERE identityId = :id ORDER BY reportDate DESC LIMIT 31")
+    @Query("""SELECT reportDate, durationMs, 'system' AS source FROM system_daily_usage WHERE identityId = :id
+        UNION ALL SELECT e.reportDate, e.durationMs, 'events' AS source FROM event_daily_usage e
+        WHERE e.identityId = :id AND NOT EXISTS (SELECT 1 FROM system_daily_usage s WHERE s.identityId = e.identityId AND s.reportDate = e.reportDate)
+        ORDER BY reportDate DESC""")
     fun observeAppDays(id: String): Flow<List<DaySummary>>
 }
 
-@Database(entities = [DeviceEntity::class, IdentityEntity::class, SessionEntity::class, DailyEntity::class, CollectionState::class, CoverageEntity::class, HistoricalBucketEntity::class, HistoryImportState::class], version = 2, exportSchema = true)
+@Database(entities = [DeviceEntity::class, IdentityEntity::class, SessionEntity::class, DailyEntity::class, EventDailyEntity::class, SystemDailyEntity::class, DailySyncState::class, CollectionState::class, CoverageEntity::class, HistoricalBucketEntity::class, HistoryImportState::class], version = 3, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun usageDao(): UsageDao
     companion object {
@@ -116,6 +147,18 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_historical_buckets_identityId_startMs_endMs ON historical_buckets(identityId, startMs, endMs)")
                 db.execSQL("""CREATE TABLE IF NOT EXISTS history_import_state (source TEXT NOT NULL PRIMARY KEY, requestedStartMs INTEGER NOT NULL, requestedEndMs INTEGER NOT NULL,
                     returnedStartMs INTEGER, returnedEndMs INTEGER, acceptedBuckets INTEGER NOT NULL, skippedBuckets INTEGER NOT NULL, lastAttemptMs INTEGER NOT NULL, status TEXT NOT NULL, detail TEXT NOT NULL)""")
+            }
+        }
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""CREATE TABLE IF NOT EXISTS event_daily_usage (identityId TEXT NOT NULL, reportDate TEXT NOT NULL, timezone TEXT NOT NULL, durationMs INTEGER NOT NULL,
+                    PRIMARY KEY(identityId, reportDate), FOREIGN KEY(identityId) REFERENCES app_identities(identityId) ON UPDATE NO ACTION ON DELETE RESTRICT)""")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_event_daily_usage_reportDate ON event_daily_usage(reportDate)")
+                db.execSQL("""CREATE TABLE IF NOT EXISTS system_daily_usage (identityId TEXT NOT NULL, reportDate TEXT NOT NULL, timezone TEXT NOT NULL, durationMs INTEGER NOT NULL,
+                    bucketStartMs INTEGER NOT NULL, bucketEndMs INTEGER NOT NULL, observedAtMs INTEGER NOT NULL,
+                    PRIMARY KEY(identityId, reportDate), FOREIGN KEY(identityId) REFERENCES app_identities(identityId) ON UPDATE NO ACTION ON DELETE RESTRICT)""")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_system_daily_usage_reportDate ON system_daily_usage(reportDate)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS daily_sync_state (id INTEGER NOT NULL PRIMARY KEY, initialDone INTEGER NOT NULL, eventRebuilt INTEGER NOT NULL, lastAttemptMs INTEGER)")
             }
         }
     }

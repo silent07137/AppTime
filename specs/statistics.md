@@ -1,4 +1,4 @@
-# Android 统计契约（1.0.0）
+# Android 统计契约（1.1.0）
 
 - metric：`android_foreground`；source：`android_usage_events`；quality：`partial`。
 - UTC 时间戳与 64 位毫秒，左闭右开 `[start, end)`。
@@ -24,6 +24,12 @@ source 为 android_usage_stats_best / android_usage_stats_daily，timezone 与 q
 身份/设备/用户/source/start 确定历史键，同键 upsert 修订，不累加。best-fit 汇总完全覆盖已有日桶时保留两份原始观测，查询只计较宽汇总；相同边界优先 best-fit。部分重叠且无法整体替代时保守跳过，不猜测剩余比例。会话原始记录保留，派生日报扣除历史拥有区间，避免再加一次。
 
 建立后前 72 小时采集会尝试更新过渡汇总，防止建立当天冻结旧观测。系统可能扩展请求区间，始终保留完整返回桶，不声称精确拆分新旧。空结果或撤权不清除已有桶。
+
+## 已记录与逐日时长
+
+“已记录”是本机保存的前台事件按应用做区间并集、按档案时区切日后的累计；即使这些事件落在旧历史汇总的范围内，记录本身仍保留并显示。升级到 v1.1.0 时从已有会话重建此缓存；后续会话修订同步重建。它与“可追溯旧历史”可能重叠，不能直接相加。“已知总计”仍用扣除历史拥有范围后的事件缓存加有效历史汇总，避免重复累计。
+
+首次同步单独请求系统 `INTERVAL_DAILY` 可用的全部逐日汇总，之后每次采集回查最近 31 天；手动“重新读取全部历史”可重读完整可用范围。同一应用/日期的重复查询覆盖原观测，不累加；短时更小的系统返回值不会清除已保存值。系统没有返回某应用某天时，逐日页面显示保存的事件日汇总。宽范围旧汇总不按比例拆成日期。设备变更时区后，旧系统日桶的原始时区无法确认，日期按档案报表时区标注，可能有偏差。
 
 [官方 API](https://developer.android.com/reference/android/app/usage/UsageStatsManager#queryUsageStats(int,%20long,%20long)) 说明返回范围可能扩展到完整聚合周期，[INTERVAL_BEST](https://developer.android.com/reference/android/app/usage/UsageStatsManager#INTERVAL_BEST) 由系统选取适合范围的周期。
 

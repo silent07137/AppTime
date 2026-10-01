@@ -6,7 +6,10 @@ sealed interface HistoryRead {
     data class Available(val buckets: List<HistoricalBucket>) : HistoryRead
     data class Unavailable(val reason: String) : HistoryRead
 }
-interface UsageHistorySource { fun read(startMs: Long, endMs: Long): HistoryRead }
+interface UsageHistorySource {
+    fun read(startMs: Long, endMs: Long): HistoryRead
+    fun readDaily(startMs: Long, endMs: Long): HistoryRead = HistoryRead.Unavailable("逐日统计不可用")
+}
 
 object HistoricalPolicy {
     /** Keep entire old/transition buckets. Their reported ranges own overlapping fine-grained data. */

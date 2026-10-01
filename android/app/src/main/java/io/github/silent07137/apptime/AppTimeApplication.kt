@@ -13,7 +13,7 @@ import io.github.silent07137.apptime.data.UsageRepository
 import java.util.concurrent.TimeUnit
 
 class AppTimeApplication : Application() {
-    val database by lazy { Room.databaseBuilder(this, AppDatabase::class.java, "apptime.db").addMigrations(AppDatabase.MIGRATION_1_2).build() }
+    val database by lazy { Room.databaseBuilder(this, AppDatabase::class.java, "apptime.db").addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3).build() }
     val repository by lazy {
         UsageRepository(database, AndroidUsageSource(this), { pkg ->
             try {

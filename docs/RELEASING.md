@@ -1,6 +1,6 @@
 # Android 签名与发布
 
-Release 构建启用 R8/资源压缩，关闭 debuggable，包名 `io.github.silent07137.apptime`。v1.0.0 versionCode 为 10000，后续必须递增。
+Release 构建启用 R8/资源压缩，关闭 debuggable，包名 `io.github.silent07137.apptime`。v1.1.0 versionCode 为 10100，后续必须递增。Debug 使用独立 `.debug` 包名。
 
 签名配置由 `APPTIME_SIGNING_PROPERTIES` 指向仓库外文件，不能提交密钥、口令或本机路径：
 
@@ -20,7 +20,7 @@ cd android
 .\sign-release.ps1 -PropertiesFile $env:APPTIME_SIGNING_PROPERTIES
 ```
 
-Gradle 先输出 `app/build/outputs/apk/release/app-release.apk`。脚本再使用同一正式密钥嵌入轮换证明，输出最终的 `AppTime-v1.0.0.apk` 和 `SHA256SUMS.txt`，均在同一 release 目录。最终 APK 使用 v3 签名，最低系统版本为 Android 10（API 29）；脚本校验签名后才报告成功。无签名配置时 Gradle 得到未签名包，不能安装。Debug/Preview 使用本机调试证书，不保证与发布版本一致。
+Gradle 先输出 `app/build/outputs/apk/release/app-release.apk`。脚本再使用同一正式密钥嵌入轮换证明，输出最终的 `AppTime-v1.1.0.apk` 和 `SHA256SUMS.txt`，均在同一 release 目录。最终 APK 使用 v3 签名，最低系统版本为 Android 10（API 29）；脚本校验签名后才报告成功。无签名配置时 Gradle 得到未签名包，不能安装。Debug/Preview 使用本机调试证书，不保证与发布版本一致。
 
 发布前验证核心/设备测试、lint、签名和版本、覆盖升级数据保留、Release 启动/UI。最终 APK 与 `SHA256SUMS.txt` 一起上传 GitHub Release；tag 指向对应源码，说明注明未实现范围。后续维护者若要支持早期测试机直接升级，应继续使用同一轮换证明和正式私钥；普通升级必须递增 versionCode。
 

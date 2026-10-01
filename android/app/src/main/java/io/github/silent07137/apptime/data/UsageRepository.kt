@@ -27,6 +27,8 @@ class UsageRepository(
         val device = dao.device() ?: DeviceEntity(UUID.randomUUID().toString(), createdAt = end, reportTimezone = timezone().id).also { dao.insertDevice(it) }
         val storedState = dao.state() ?: CollectionState(recordFromMs = end)
         val oldState = if (!storedState.enabled && source.hasAccess()) storedState.copy(recordFromMs = end, enabled = true) else storedState
+        rebuildEventDaysLocked(device)
+        if (oldState.enabled && source.hasAccess()) syncSystemDaysLocked(device, end)
         val ownedStart = maxOf(oldState.recordFromMs, end - 48 * HOUR_MS)
         // Pre-read supplies an actual resume anchor; no guessed start at a query boundary.
         val queryStart = maxOf(0, ownedStart - 24 * HOUR_MS)
@@ -106,7 +108,10 @@ class UsageRepository(
                             val stop = lastDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
                             val intervals = dao.overlapping(identityId, start, stop).map { Interval(maxOf(start, it.startMs), minOf(stop, it.endMs)) }
                             val authority = dao.overlappingBuckets(identityId, start, stop, "").map { Interval(it.startMs, it.endMs) }
+                            val eventDays = UsageMath.daily(intervals, zone).map { (date, duration) -> EventDailyEntity(identityId, date.toString(), zone.id, duration) }
                             val days = UsageMath.daily(UsageMath.subtract(intervals, authority), zone).map { (date, duration) -> DailyEntity(identityId, date.toString(), zone.id, duration) }
+                            dao.clearEventDays(identityId, firstDate.toString(), lastDate.toString())
+                            dao.saveEventDays(eventDays)
                             dao.clearDays(identityId, firstDate.toString(), lastDate.toString())
                             dao.saveDays(days)
                         }
@@ -132,7 +137,60 @@ class UsageRepository(
         val device = dao.device() ?: return@withLock false
         val state = dao.state() ?: return@withLock false
         if (!state.enabled) return@withLock false
-        importHistoryLocked(days, device, state, now())
+        val attempt = now()
+        val historyImported = importHistoryLocked(days, device, state, attempt)
+        val dailyImported = syncSystemDaysLocked(device, attempt, forceFull = days == 0)
+        historyImported || dailyImported
+    }
+
+    private suspend fun rebuildEventDaysLocked(device: DeviceEntity) {
+        val sync = dao.dailySyncState() ?: DailySyncState()
+        if (sync.eventRebuilt) return
+        val zone = ZoneId.of(device.reportTimezone)
+        db.withTransaction {
+            dao.allSessions().groupBy { it.identityId }.forEach { (identityId, sessions) ->
+                val intervals = sessions.filter { it.endMs > it.startMs }.map { Interval(it.startMs, it.endMs) }
+                dao.saveEventDays(UsageMath.daily(intervals, zone).map { (date, duration) ->
+                    EventDailyEntity(identityId, date.toString(), zone.id, duration)
+                })
+            }
+            dao.saveDailySyncState(sync.copy(eventRebuilt = true))
+        }
+    }
+
+    private suspend fun syncSystemDaysLocked(device: DeviceEntity, attempt: Long, forceFull: Boolean = false): Boolean {
+        val provider = historySource ?: return false
+        val sync = dao.dailySyncState() ?: DailySyncState()
+        val start = if (forceFull || !sync.initialDone) 0L else maxOf(0, attempt - 31 * 24 * HOUR_MS)
+        val read = provider.readDaily(start, attempt)
+        if (read is HistoryRead.Unavailable) return false
+        val zone = ZoneId.of(device.reportTimezone)
+        val buckets = (read as HistoryRead.Available).buckets.filter {
+            it.packageName.isNotBlank() && it.startMs >= 0 && it.startMs < attempt && it.endMs > it.startMs && it.usageMs > 0
+        }
+        // A daily system bucket can be returned again on every refresh. Keep one observation
+        // per package/day, replacing it only with a larger cumulative value.
+        val byDay = buckets.groupBy { it.packageName to Instant.ofEpochMilli(it.startMs).atZone(zone).toLocalDate() }
+            .mapValues { (_, values) -> values.maxWith(compareBy<HistoricalBucket> { it.usageMs }.thenBy { it.endMs }) }
+        db.withTransaction {
+            val rows = mutableListOf<SystemDailyEntity>()
+            for ((key, bucket) in byDay) {
+                val (pkg, date) = key
+                var identity = dao.identity(device.deviceId, profile, pkg)
+                if (identity == null) {
+                    identity = IdentityEntity(UUID.randomUUID().toString(), device.deviceId, profile, pkg, resolveName(pkg))
+                    dao.insertIdentity(identity)
+                }
+                val previous = dao.systemDay(identity.identityId, date.toString())
+                if (previous == null || bucket.usageMs > previous.durationMs) {
+                    rows += SystemDailyEntity(identity.identityId, date.toString(), zone.id, bucket.usageMs,
+                        bucket.startMs, bucket.endMs, attempt)
+                }
+            }
+            if (rows.isNotEmpty()) dao.saveSystemDays(rows)
+            dao.saveDailySyncState(sync.copy(initialDone = true, lastAttemptMs = attempt))
+        }
+        return buckets.isNotEmpty()
     }
 
     private suspend fun importHistoryLocked(days: Int, device: DeviceEntity, state: CollectionState, attempt: Long, updateOnly: Boolean = false): Boolean {

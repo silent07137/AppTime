@@ -3,7 +3,12 @@ package io.github.silent07137.apptime.ui
 
 import android.graphics.Bitmap
 import android.graphics.Canvas as AndroidCanvas
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -40,7 +45,7 @@ import kotlinx.coroutines.withContext
 fun AppScreen(repo: UsageRepository, collecting: MutableStateFlow<Boolean>, importing: MutableStateFlow<Boolean>, error: MutableStateFlow<String?>,
     access: MutableStateFlow<Boolean>, refresh: () -> Unit, openPermission: () -> Unit, importHistory: (Int) -> Unit) {
     val allApps by remember(repo) { repo.dao.observeApps() }.collectAsStateWithLifecycle(initialValue = emptyList())
-    val apps = allApps.filter { it.durationMs + it.historicalMs > 0 }
+    val apps = allApps.filter { it.durationMs + it.historicalMs + it.recordedMs > 0 }
     val state by remember(repo) { repo.dao.observeState() }.collectAsStateWithLifecycle(initialValue = null)
     val history by remember(repo) { repo.dao.observeHistoryState() }.collectAsStateWithLifecycle(initialValue = null)
     val gaps by remember(repo) { repo.dao.observeGapCount() }.collectAsStateWithLifecycle(initialValue = 0)
@@ -51,22 +56,35 @@ fun AppScreen(repo: UsageRepository, collecting: MutableStateFlow<Boolean>, impo
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var search by rememberSaveable { mutableStateOf("") }
+    var aboutOpen by rememberSaveable { mutableStateOf(false) }
     var zone by remember { mutableStateOf(ZoneId.systemDefault()) }
     var showInfo by rememberSaveable { mutableStateOf(false) }
     var license by remember { mutableStateOf<String?>(null) }
+    var licenseTitle by remember { mutableStateOf("") }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     LaunchedEffect(state) { withContext(Dispatchers.IO) { repo.dao.device() }?.let { zone = ZoneId.of(it.reportTimezone) } }
     val today = LocalDate.now(zone)
     val days by remember(repo, today) { repo.dao.observeDays(today.minusDays(6).toString()) }.collectAsStateWithLifecycle(initialValue = emptyList())
     val selected = allApps.firstOrNull { it.identityId == selectedId }
-    BackHandler(enabled = selectedId != null) { selectedId = null }
+    val page = if (aboutOpen) "about" else selectedId?.let { "app:$it" } ?: "tab:$tab"
+    BackHandler(enabled = aboutOpen || selectedId != null) { if (aboutOpen) aboutOpen = false else selectedId = null }
     if (showInfo) AlertDialog(onDismissRequest = { showInfo = false }, title = { Text("数据说明") },
         text = { DataNotes(state, history, gaps, zone) }, confirmButton = { TextButton(onClick = { showInfo = false }) { Text("知道了") } })
-    if (license != null) AlertDialog(onDismissRequest = { license = null }, title = { Text("GNU GPL v2") },
+    if (license != null) AlertDialog(onDismissRequest = { license = null }, title = { Text(licenseTitle) },
         text = { LazyColumn { item { Text(license!!) } } }, confirmButton = { TextButton(onClick = { license = null }) { Text("关闭") } })
+    fun openAsset(title: String, name: String) {
+        scope.launch {
+            licenseTitle = title
+            license = withContext(Dispatchers.IO) { context.assets.open(name).bufferedReader().use { it.readText() } }
+        }
+    }
+    fun openRepository() {
+        try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/silent07137/AppTime"))) }
+        catch (_: ActivityNotFoundException) { error.value = "没有可打开仓库链接的浏览器。" }
+    }
     Scaffold(containerColor = MaterialTheme.colorScheme.background, bottomBar = {
-        if (selected == null) NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
+        if (selectedId == null && !aboutOpen) NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
             val labels = listOf("总览", "应用", "趋势", "设置")
             val icons = listOf(Symbol.CLOCK, Symbol.APPS, Symbol.CHART, Symbol.SETTINGS)
             labels.forEachIndexed { index, label -> NavigationBarItem(selected = tab == index, onClick = { tab = index },
@@ -75,13 +93,13 @@ fun AppScreen(repo: UsageRepository, collecting: MutableStateFlow<Boolean>, impo
     }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (selected != null) IconButton(onClick = { selectedId = null }, modifier = Modifier.semantics { contentDescription = "返回" }) { Glyph(Symbol.BACK) }
+                if (selectedId != null || aboutOpen) IconButton(onClick = { if (aboutOpen) aboutOpen = false else selectedId = null }, modifier = Modifier.semantics { contentDescription = "返回" }) { Glyph(Symbol.BACK) }
                 Column(Modifier.weight(1f)) {
-                    Text(if (selected != null) "应用详情" else listOf("AppTime", "应用档案", "使用趋势", "设置")[tab], fontSize = 25.sp, fontWeight = FontWeight.Bold)
-                    if (selected == null) Text(if (tab == 0) "把时间，留成记录" else listOf("", "${apps.size} 个应用 · 按累计排序", "最近 7 天 · 前台记录", "本机保存 · 离线运行")[tab],
+                    Text(if (aboutOpen) "关于 AppTime" else if (selectedId != null) "应用详情" else listOf("AppTime", "应用档案", "使用趋势", "设置")[tab], fontSize = 25.sp, fontWeight = FontWeight.Bold)
+                    if (selectedId == null && !aboutOpen) Text(if (tab == 0) "把时间，留成记录" else listOf("", "${apps.size} 个应用 · 按累计排序", "最近 7 天 · 每日使用", "本机保存 · 离线运行")[tab],
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                IconButton(onClick = refresh, enabled = !busy && !historyBusy, modifier = Modifier.semantics { contentDescription = "刷新记录" }) { Glyph(Symbol.REFRESH) }
+                if (!aboutOpen) IconButton(onClick = refresh, enabled = !busy && !historyBusy, modifier = Modifier.semantics { contentDescription = "刷新记录" }) { Glyph(Symbol.REFRESH) }
             }
             if (busy || historyBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (!authorized) {
@@ -94,11 +112,14 @@ fun AppScreen(repo: UsageRepository, collecting: MutableStateFlow<Boolean>, impo
                 }
             }
             if (failure != null) Text(failure!!, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
-            if (selected != null) {
-                AppDetail(selected, repo, zone)
-            } else when (tab) {
+            Crossfade(targetState = page, animationSpec = tween(220), label = "页面切换") { activePage ->
+            if (activePage == "about") {
+                AboutScreen(context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "", ::openRepository, ::openAsset)
+            } else if (activePage.startsWith("app:")) {
+                allApps.firstOrNull { it.identityId == activePage.removePrefix("app:") }?.let { AppDetail(it, repo, zone) }
+            } else when (activePage.removePrefix("tab:").toInt()) {
                 0 -> LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                    item { TotalCard(apps, allApps.any { it.firstMs != null }, history, zone, onInfo = { showInfo = true }) }
+                    item { TotalCard(apps, allApps.any { it.recordedMs > 0 }, history, zone, onInfo = { showInfo = true }) }
                     item {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                             Text(if (busy) "正在同步记录…" else if (state?.lastSuccessMs != null) "更新于 ${timeText(state?.lastSuccessMs, zone, "HH:mm")}" else "等待采集",
@@ -134,14 +155,14 @@ fun AppScreen(repo: UsageRepository, collecting: MutableStateFlow<Boolean>, impo
                 }
                 2 -> LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     item { WeekChart(today, days) }
-                    item { Text("细粒度记录", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
+                    item { Text("每天的使用时长", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
                     items((0L..6L).map { today.minusDays(it) }) { date ->
                         Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface) {
-                            DayRow(date.toString(), days.firstOrNull { it.reportDate == date.toString() }?.durationMs)
+                            days.firstOrNull { it.reportDate == date.toString() }.let { DayRow(date.toString(), it?.durationMs, it?.source) }
                         }
                     }
-                    item { Expandable("关于趋势", "系统旧历史不拆分到此图") {
-                        Text("这里只展示已采集会话的每日汇总，可能有缺口。系统历史按原始范围保留，不能可靠拆到每天。报表时区：${zone.id}。", style = MaterialTheme.typography.bodyMedium)
+                    item { Expandable("关于趋势", "每日数据来源") {
+                        Text("优先显示系统返回的逐日时长；系统未返回的日期使用已采集事件。更早的宽范围汇总不能可靠拆到每天。报表时区：${zone.id}。", style = MaterialTheme.typography.bodyMedium)
                     } }
                 }
                 3 -> LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -160,10 +181,11 @@ fun AppScreen(repo: UsageRepository, collecting: MutableStateFlow<Boolean>, impo
                         Spacer(Modifier.height(12.dp))
                         Text("此版尚无备份。卸载 AppTime 或清除数据会移除本机档案。", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
                     } }
-                    item { SettingsCard("AppTime", "1.0.0 · GPLv2") {
-                        TextButton(onClick = { scope.launch { license = withContext(Dispatchers.IO) { context.assets.open("LICENSE").bufferedReader().use { it.readText() } } } }) { Text("开源许可证") }
+                    item { SettingsCard("关于 AppTime", "版本、源码与许可") {
+                        TextButton(onClick = { aboutOpen = true }) { Text("查看关于页面"); Glyph(Symbol.CHEVRON, Modifier.size(18.dp)) }
                     } }
                 }
+            }
             }
         }
     }
@@ -181,7 +203,7 @@ private val AppSummary.knownTotal: Long get() = durationMs + historicalMs
             Text(if (apps.isEmpty()) "未采集" else duration(apps.sumOf { it.knownTotal }), fontSize = 38.sp, lineHeight = 46.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
             HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .12f))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Metric("已记录", if (hasSessions) duration(apps.sumOf { it.durationMs }) else "未采集", Modifier.weight(1f))
+                Metric("已记录", if (hasSessions) duration(apps.sumOf { it.recordedMs }) else "未采集", Modifier.weight(1f))
                 Metric("可追溯旧历史", if (apps.any { it.historicalBuckets > 0 }) duration(apps.sumOf { it.historicalMs }) else "未取得", Modifier.weight(1f))
             }
             Text(history?.returnedStartMs?.let { "可追溯至 ${timeText(it, zone, "yyyy-MM-dd")} · 完整性未知" } ?: "各应用前台时长之和", style = MaterialTheme.typography.labelMedium,
@@ -247,7 +269,7 @@ private val AppSummary.knownTotal: Long get() = durationMs + historicalMs
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("已记录", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("每日使用", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(if (days.isEmpty()) "未采集" else duration(days.sumOf { it.durationMs }), fontWeight = FontWeight.Bold)
             }
             Row(Modifier.fillMaxWidth().height(116.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Bottom) {
@@ -262,7 +284,7 @@ private val AppSummary.knownTotal: Long get() = durationMs + historicalMs
                     }
                 }
             }
-            Text("细粒度记录 · 不含系统旧历史", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("系统逐日统计优先 · 缺失时使用事件记录", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -285,7 +307,7 @@ private val AppSummary.knownTotal: Long get() = durationMs + historicalMs
                     Text("已知总计", style = MaterialTheme.typography.titleMedium)
                     Text(duration(app.knownTotal), fontSize = 36.sp, lineHeight = 44.sp, fontWeight = FontWeight.Bold)
                     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Metric("已记录", if (app.firstMs != null) duration(app.durationMs) else "未采集", Modifier.weight(1f))
+                Metric("已记录", if (app.recordedMs > 0) duration(app.recordedMs) else "未采集", Modifier.weight(1f))
                         Metric("可追溯旧历史", if (app.historicalBuckets > 0) duration(app.historicalMs) else "未取得", Modifier.weight(1f))
                     }
                 }
@@ -294,18 +316,38 @@ private val AppSummary.knownTotal: Long get() = durationMs + historicalMs
         item { Expandable("档案信息", "首次记录与来源") {
             Text("首次记录  ${timeText(app.firstMs, zone)}\n最近前台  ${timeText(app.lastMs, zone)}\n安装状态  未知", style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(12.dp))
-            Text("前台事件与系统旧汇总分开保存。跨越建立时间的完整汇总归入旧历史估算，不重复累计；未结束会话会修订。首次记录不代表安装时间。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("前台事件和系统汇总分开保存；已记录与旧历史可能重叠，不可直接相加。首次记录不代表安装时间。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         } }
-        item { Text("最近有记录的日期", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
-        if (days.isEmpty()) item { EmptyState("还没有独立的每日记录", "旧历史保留在累计中") }
-        items(days, key = { it.reportDate }) { Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface) { DayRow(it.reportDate, it.durationMs) } }
+        item { Text("每天的使用时长", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
+        if (days.isEmpty()) item { EmptyState("系统尚未返回每日数据", "已有宽范围历史仍保留在累计中") }
+        items(days, key = { it.reportDate }) { Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface) { DayRow(it.reportDate, it.durationMs, it.source) } }
     }
 }
 
-@Composable private fun DayRow(date: String, ms: Long?) {
+@Composable private fun DayRow(date: String, ms: Long?, source: String? = null) {
     Row(Modifier.fillMaxWidth().padding(18.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(date, style = MaterialTheme.typography.bodyMedium)
+        Column {
+            Text(date, style = MaterialTheme.typography.bodyMedium)
+            if (source != null) Text(when (source) { "system" -> "系统逐日统计"; "events" -> "事件记录"; else -> "系统与事件记录" },
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         Text(ms?.let(::duration) ?: "未采集", style = MaterialTheme.typography.titleSmall, color = if (ms == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary)
+    }
+}
+
+@Composable private fun AboutScreen(version: String, openRepository: () -> Unit, openAsset: (String, String) -> Unit) {
+    LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        item { SettingsCard("AppTime", "版本 $version · GPLv2") {
+            Text("离线保存应用使用时长", style = MaterialTheme.typography.bodyMedium)
+        } }
+        item { SettingsCard("开源仓库", "github.com/silent07137/AppTime") {
+            TextButton(onClick = openRepository) { Text("打开 GitHub 仓库"); Glyph(Symbol.CHEVRON, Modifier.size(18.dp)) }
+        } }
+        item { SettingsCard("许可证", "应用源码与第三方组件") {
+            TextButton(onClick = { openAsset("GNU GPL v2", "LICENSE") }) { Text("开源许可证 · GPLv2") }
+            TextButton(onClick = { openAsset("第三方许可证", "THIRD_PARTY_NOTICES.txt") }) { Text("第三方许可证") }
+            TextButton(onClick = { openAsset("Apache License 2.0", "APACHE-2.0.txt") }) { Text("Apache-2.0 全文") }
+        } }
     }
 }
 
@@ -337,7 +379,7 @@ private val AppSummary.knownTotal: Long get() = durationMs + historicalMs
 
 @Composable private fun DataNotes(state: CollectionState?, history: HistoryImportState?, gaps: Int, zone: ZoneId) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("已知总计包含不重叠的已记录与旧历史，均为应用前台口径；分屏可同时累计。系统数据完整性未知。", style = MaterialTheme.typography.bodyMedium)
+        Text("已记录是保存的前台事件累计；它与旧历史可能重叠，不能直接相加。已知总计按历史范围去重。每日时长优先采用系统逐日统计，缺失时使用事件记录。", style = MaterialTheme.typography.bodyMedium)
         Text("记录起点  ${timeText(state?.takeIf { it.enabled }?.recordFromMs, zone)}\n最后保存  ${timeText(state?.lastSuccessMs, zone)}\n采集状态  ${state?.status ?: "未采集"}", style = MaterialTheme.typography.bodySmall)
         if (gaps > 0) Text("$gaps 段查询范围不可用或完整性未知；记录已保留。", style = MaterialTheme.typography.bodySmall)
         if (history != null) Text("历史查询  ${if (history.requestedStartMs == 0L) "系统保留的最早记录" else timeText(history.requestedStartMs, zone)} → ${timeText(history.requestedEndMs, zone)}\n实际返回  ${timeText(history.returnedStartMs, zone)} → ${timeText(history.returnedEndMs, zone)}\n采用 ${history.acceptedBuckets} 个汇总，跳过 ${history.skippedBuckets} 个。", style = MaterialTheme.typography.bodySmall)
@@ -355,7 +397,7 @@ private val AppSummary.knownTotal: Long get() = durationMs + historicalMs
 
 private fun duration(ms: Long): String {
     val seconds = ms / 1_000
-    return when { seconds < 60 -> "$seconds 秒"; seconds < 3_600 -> "${seconds / 60} 分"; else -> "${seconds / 3_600} 小时 ${(seconds / 60) % 60} 分" }
+    return when { ms in 1..999 -> "<1 秒"; seconds < 60 -> "$seconds 秒"; seconds < 3_600 -> "${seconds / 60} 分"; else -> "${seconds / 3_600} 小时 ${(seconds / 60) % 60} 分" }
 }
 private fun timeText(ms: Long?, zone: ZoneId, pattern: String = "yyyy-MM-dd HH:mm"): String = ms?.let {
     Instant.ofEpochMilli(it).atZone(zone).format(DateTimeFormatter.ofPattern(pattern))

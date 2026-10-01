@@ -67,6 +67,7 @@ class UsageRepositoryTest {
         source.result = EventRead.Available(listOf(e(0, EventKind.RESUME), e(15_000, EventKind.PAUSE)))
         repo.collect()
         assertEquals(15_000L, total())
+        assertEquals(15_000L, db.usageDao().observeApps().first().single().recordedMs)
         assertEquals(2L, db.usageDao().session(sessionId("device-one", "personal", "A", 0))!!.revision)
     }
     @Test fun overlappingAnchorsAreUnionedPerIdentity() = runBlocking {
@@ -75,6 +76,7 @@ class UsageRepositoryTest {
         source.result = EventRead.Available(listOf(e(8_000, EventKind.RESUME), e(15_000, EventKind.PAUSE)))
         repo.collect()
         assertEquals(15_000L, total())
+        assertEquals(15_000L, db.usageDao().observeApps().first().single().recordedMs)
     }
     @Test fun unknownRebootTailIsTombstoned() = runBlocking {
         clock = 20_000
@@ -143,6 +145,38 @@ class UsageRepositoryTest {
         // A later event refresh also respects the historical authority ranges.
         withHistory.collect()
         assertEquals(10_000L, total())
+        assertTrue(db.usageDao().observeApps().first().single().recordedMs > 10_000L)
+    }
+    @Test fun recordedEventsAndSystemDailyStatsSurviveRepeatedCollection() = runBlocking {
+        val day = 86_400_000L
+        val recordFrom = day + 12 * 3_600_000L
+        clock = 2 * day + 60_000L
+        db.usageDao().saveState(CollectionState(recordFromMs = recordFrom, enabled = true))
+        source.result = EventRead.Available(listOf(e(recordFrom, EventKind.RESUME), e(2 * day + 30_000L, EventKind.PAUSE)))
+        var dailyAvailable = true
+        val history = object : UsageHistorySource {
+            override fun read(startMs: Long, endMs: Long) = HistoryRead.Available(listOf(
+                HistoricalBucket("A", day, 2 * day, 10_800_000L, "android_usage_stats_best")))
+            override fun readDaily(startMs: Long, endMs: Long) = HistoryRead.Available(if (dailyAvailable) listOf(
+                HistoricalBucket("A", day, 2 * day, 10_800_000L),
+                HistoricalBucket("A", 2 * day, 3 * day, 30_000L)) else emptyList())
+        }
+        val withHistory = UsageRepository(db, source, { it }, "personal", { clock }, { zone }, history)
+        assertTrue(withHistory.collect())
+        val first = db.usageDao().observeApps().first().single()
+        assertEquals(12 * 3_600_000L + 30_000L, first.recordedMs)
+        assertEquals(30_000L, first.durationMs)
+        val firstDays = db.usageDao().observeAppDays(first.identityId).first()
+        assertEquals(listOf("1970-01-03", "1970-01-02"), firstDays.map { it.reportDate })
+        assertEquals(listOf(30_000L, 10_800_000L), firstDays.map { it.durationMs })
+        assertTrue(firstDays.all { it.source == "system" })
+        dailyAvailable = false
+        source.result = EventRead.Available(emptyList())
+        repeat(3) { assertFalse(withHistory.collect()) }
+        val reopened = UsageRepository(db, source, { it }, "personal", { clock }, { zone }, history)
+        assertFalse(reopened.collect())
+        assertEquals(first.recordedMs, db.usageDao().observeApps().first().single().recordedMs)
+        assertEquals(firstDays, db.usageDao().observeAppDays(first.identityId).first())
     }
     @Test fun emptyHistoricalQueryPreservesExistingBuckets() = runBlocking {
         var result: HistoryRead = HistoryRead.Available(listOf(HistoricalBucket("A", 0, 20_000, 5_000)))

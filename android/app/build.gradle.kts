@@ -13,11 +13,12 @@ android {
         applicationId = "io.github.silent07137.apptime"
         minSdk = 29
         targetSdk = 36
-        versionCode = 10000
-        versionName = "1.0.0"
+        versionCode = 10100
+        versionName = "1.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        resValue("string", "app_name", "AppTime")
     }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; resValues = true }
     val signingFile = providers.environmentVariable("APPTIME_SIGNING_PROPERTIES").orNull?.let(::file)
     if (signingFile != null) {
         val signing = Properties().apply { signingFile.inputStream().use { load(it) } }
@@ -33,6 +34,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            resValue("string", "app_name", "AppTime 测试")
+        }
         release {
             if (signingFile != null) signingConfig = signingConfigs.getByName("apptime")
             isMinifyEnabled = true
