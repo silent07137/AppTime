@@ -10,4 +10,5 @@ signing.properties
 *.hprof
 *.atbackup
 artifacts/
+/AppTime_Codex开发文档.md
 .DS_Store
