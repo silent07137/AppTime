@@ -44,6 +44,7 @@ class MainActivity : ComponentActivity() {
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
+                withContext(Dispatchers.IO) { repository.recordFailure() }
                 error.value = "采集失败，已有记录已保留。请稍后重试。"
             } finally {
                 access.value = repository.hasAccess()

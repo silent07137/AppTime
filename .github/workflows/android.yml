@@ -2,6 +2,7 @@ name: Android checks
 on:
   push:
   pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -26,10 +27,47 @@ jobs:
       - name: Build, lint, and core tests
         run: |
           chmod +x gradlew
-          ./gradlew :core:test :app:lintDebug :app:assembleDebug :app:assemblePreview
+          ./gradlew :core:test :app:lintDebug :app:lintRelease :app:assembleDebug :app:assemblePreview :app:assembleRelease
       - uses: actions/upload-artifact@v4
         with:
           name: apptime-test-apks
           path: |
-            android/app/build/outputs/apk/debug/app-debug.apk
-            android/app/build/outputs/apk/preview/app-preview.apk
+              android/app/build/outputs/apk/debug/app-debug.apk
+              android/app/build/outputs/apk/preview/app-preview.apk
+      - name: Sign release with the original certificate and lineage
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${KEYSTORE_BASE64:?Missing KEYSTORE_BASE64 secret}"
+          : "${KEYSTORE_PASSWORD:?Missing KEYSTORE_PASSWORD secret}"
+          : "${KEY_PASSWORD:?Missing KEY_PASSWORD secret}"
+          key_file="$RUNNER_TEMP/apptime-release.p12"
+          trap 'rm -f "$key_file"' EXIT
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$key_file"
+          version=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          release_dir=app/build/outputs/apk/release
+          apk="$release_dir/AppTime-v$version.apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign \
+            --ks "$key_file" --ks-type PKCS12 --ks-key-alias apptime \
+            --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEY_PASSWORD \
+            --lineage signing-lineage.bin --rotation-min-sdk-version 28 \
+            --v1-signing-enabled false --v2-signing-enabled false --v3-signing-enabled true \
+            --out "$apk" "$release_dir/app-release-unsigned.apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --min-sdk-version 29 --verbose --print-certs "$apk"
+          (cd "$release_dir" && sha256sum "AppTime-v$version.apk" > SHA256SUMS.txt)
+          printf '%s\n' "$GITHUB_SHA" > "$release_dir/SOURCE_COMMIT.txt"
+      - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          name: apptime-release-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            android/app/build/outputs/apk/release/AppTime-v*.apk
+            android/app/build/outputs/apk/release/SHA256SUMS.txt
+            android/app/build/outputs/apk/release/SOURCE_COMMIT.txt

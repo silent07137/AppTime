@@ -30,7 +30,7 @@ class MigrationTest {
             execSQL("INSERT INTO collection_state (source,recordFromMs,checkpointMs,lastSuccessMs,enabled,status,detail) VALUES ('android_usage_events',0,15000,15000,1,'部分可用','fixture')")
             close()
         }
-        val migrated = helper.runMigrationsAndValidate("migration-test", 3, true, AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
+        val migrated = helper.runMigrationsAndValidate("migration-test", 4, true, AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
         migrated.query("SELECT durationMs FROM sessions WHERE sessionId='session-one'").use { assertTrue(it.moveToFirst()); assertEquals(15_000L, it.getLong(0)) }
         migrated.query("SELECT durationMs FROM daily_usage").use { assertTrue(it.moveToFirst()); assertEquals(15_000L, it.getLong(0)) }
         migrated.query("SELECT checkpointMs FROM collection_state").use { assertTrue(it.moveToFirst()); assertEquals(15_000L, it.getLong(0)) }
@@ -49,12 +49,12 @@ class MigrationTest {
                 VALUES ('session-one','device-one','identity-one',1000,1000,6000,5000,'UTC',0,'android_foreground','android_usage_events',0,0,'partial',1,0)""")
             close()
         }
-        val migrated = helper.runMigrationsAndValidate("migration-v2-test", 3, true, AppDatabase.MIGRATION_2_3)
+        val migrated = helper.runMigrationsAndValidate("migration-v2-test", 4, true, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
         migrated.query("SELECT usageMs FROM historical_buckets WHERE bucketId='bucket-one'").use { assertTrue(it.moveToFirst()); assertEquals(5000L, it.getLong(0)) }
         migrated.query("SELECT durationMs FROM sessions WHERE sessionId='session-one'").use { assertTrue(it.moveToFirst()); assertEquals(5000L, it.getLong(0)) }
         migrated.close()
         val db = Room.databaseBuilder(InstrumentationRegistry.getInstrumentation().targetContext, AppDatabase::class.java, "migration-v2-test")
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3).build()
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4).build()
         val source = object : UsageEventSource {
             override fun hasAccess() = true
             override fun read(startMs: Long, endMs: Long) = EventRead.Available(emptyList())

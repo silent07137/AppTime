@@ -1,4 +1,4 @@
-# Android 统计契约（1.1.0）
+# Android 统计契约（1.2.0）
 
 - metric：`android_foreground`；source：`android_usage_events`；quality：`partial`。
 - UTC 时间戳与 64 位毫秒，左闭右开 `[start, end)`。
@@ -33,4 +33,12 @@ source 为 android_usage_stats_best / android_usage_stats_daily，timezone 与 q
 
 [官方 API](https://developer.android.com/reference/android/app/usage/UsageStatsManager#queryUsageStats(int,%20long,%20long)) 说明返回范围可能扩展到完整聚合周期，[INTERVAL_BEST](https://developer.android.com/reference/android/app/usage/UsageStatsManager#INTERVAL_BEST) 由系统选取适合范围的周期。
 
-手动补记、不同平台 metric 尚未接入。安装状态固定 unknown，首次记录不能解释为安装日期。
+## 管理与每日明细（v1.2.0）
+
+分类、隐藏和忽略为独立持久偏好。隐藏只影响默认列表；历史仍计入总量。忽略区间以 UTC 保存，回查会话扣除此区间，恢复后也不补记忽略时段。无法扣除的系统汇总桶跳过更新，旧观测保留；旧历史所有权止于首次忽略边界。系统日报快照与恢复后的事件使用独立派生补充缓存衔接，避免日报冻结或重复计时。
+
+手动调整单独保存应用、日期、档案时区、正负毫秒、备注和创建时间；不改原始会话或系统观测，允许撤销。新增扣减校验当日和累计不小于零；若以后暂定事件缩短，展示结果最低为零，原调整仍可撤销。小时分布仅来自真实保存的会话，逐应用先做并集再切真实小时；23/25 小时日保留全部小时，重复小时标明偏移。手动调整和仅有旧汇总的数据不分摊到小时。跨应用总量为各应用之和。
+
+可观测到包时保存名称、签名辅助证据与图标缓存。不可见的包标为安装状态未知，保留档案和缓存，不声称已卸载。不兼容签名变化暂停写入，用户确认后才续接当前档案。首次记录不能解释为安装日期。
+
+不同平台 metric、逻辑应用映射和报表时区编辑尚未接入。

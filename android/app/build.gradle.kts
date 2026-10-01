@@ -13,8 +13,8 @@ android {
         applicationId = "io.github.silent07137.apptime"
         minSdk = 29
         targetSdk = 36
-        versionCode = 10100
-        versionName = "1.1.0"
+        versionCode = 10200
+        versionName = "1.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         resValue("string", "app_name", "AppTime")
     }
@@ -56,6 +56,8 @@ android {
 }
 kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
 ksp { arg("room.schemaLocation", "$projectDir/schemas") }
+// Export the current Room schema before packaging migration-test assets.
+tasks.matching { it.name == "mergeDebugAndroidTestAssets" }.configureEach { dependsOn("kspDebugKotlin") }
 dependencies {
     implementation(project(":core"))
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))

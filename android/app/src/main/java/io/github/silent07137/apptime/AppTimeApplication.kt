@@ -8,19 +8,21 @@ import androidx.room.Room
 import androidx.work.*
 import io.github.silent07137.apptime.collection.AndroidUsageSource
 import io.github.silent07137.apptime.collection.AndroidUsageHistorySource
+import io.github.silent07137.apptime.collection.AndroidAppCatalog
 import io.github.silent07137.apptime.data.AppDatabase
 import io.github.silent07137.apptime.data.UsageRepository
 import java.util.concurrent.TimeUnit
 
 class AppTimeApplication : Application() {
-    val database by lazy { Room.databaseBuilder(this, AppDatabase::class.java, "apptime.db").addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3).build() }
+    val catalog by lazy { AndroidAppCatalog(this) }
+    val database by lazy { Room.databaseBuilder(this, AppDatabase::class.java, "apptime.db").addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4).build() }
     val repository by lazy {
         UsageRepository(database, AndroidUsageSource(this), { pkg ->
             try {
                 @Suppress("DEPRECATION")
                 packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
             } catch (_: PackageManager.NameNotFoundException) { pkg }
-        }, profile = Process.myUserHandle().toString(), historySource = AndroidUsageHistorySource(this))
+        }, profile = Process.myUserHandle().toString(), historySource = AndroidUsageHistorySource(this), inspectApp = catalog::inspect)
     }
     override fun onCreate() {
         super.onCreate()
@@ -37,6 +39,7 @@ class CollectWorker(context: android.content.Context, parameters: WorkerParamete
     } catch (cancelled: kotlinx.coroutines.CancellationException) {
         throw cancelled
     } catch (_: Exception) {
+        try { (applicationContext as AppTimeApplication).repository.recordFailure() } catch (_: Exception) { }
         Result.retry()
     }
 }
