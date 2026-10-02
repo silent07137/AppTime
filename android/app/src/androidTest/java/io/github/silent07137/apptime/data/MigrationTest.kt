@@ -20,6 +20,26 @@ import org.junit.runner.RunWith
 class MigrationTest {
     @get:Rule val helper = MigrationTestHelper(InstrumentationRegistry.getInstrumentation(), AppDatabase::class.java.canonicalName!!, FrameworkSQLiteOpenHelperFactory())
 
+    @Test fun upgradeFromFourPreservesManagementAndAddsMergeRevisionsAndCollectorIdentity() {
+        helper.createDatabase("migration-v4-test", 4).apply {
+            execSQL("INSERT INTO devices VALUES ('device-one','android',0,'UTC')")
+            execSQL("INSERT INTO app_identities VALUES ('identity-one','device-one','personal','A','A')")
+            execSQL("INSERT INTO app_preferences VALUES ('identity-one','学习',1,1)")
+            execSQL("INSERT INTO ignore_periods VALUES ('ignore-one','identity-one',1000,NULL)")
+            execSQL("INSERT INTO manual_adjustments VALUES ('adjust-one','identity-one','1970-01-01','UTC',60000,'note',1000)")
+            execSQL("INSERT INTO coverage VALUES ('query:0','device-one',0,1000,'partial','test')")
+            close()
+        }
+        helper.runMigrationsAndValidate("migration-v4-test", 5, true, AppDatabase.MIGRATION_4_5).use { migrated ->
+            migrated.query("SELECT category,hidden,ignored,revision FROM app_preferences").use { assertTrue(it.moveToFirst()); assertEquals("学习", it.getString(0)); assertEquals(1, it.getInt(1)); assertEquals(1, it.getInt(2)); assertEquals(1L, it.getLong(3)) }
+            migrated.query("SELECT endMs,revision FROM ignore_periods").use { assertTrue(it.moveToFirst()); assertTrue(it.isNull(0)); assertEquals(1L, it.getLong(1)) }
+            migrated.query("SELECT deltaMs,revision,deleted FROM manual_adjustments").use { assertTrue(it.moveToFirst()); assertEquals(60000L, it.getLong(0)); assertEquals(1L, it.getLong(1)); assertEquals(0, it.getInt(2)) }
+            migrated.query("SELECT localDeviceId FROM local_archive_state").use { assertTrue(it.moveToFirst()); assertEquals("device-one", it.getString(0)) }
+            migrated.query("SELECT coverageId FROM coverage").use { assertTrue(it.moveToFirst()); assertEquals("device-one:query:0", it.getString(0)) }
+            migrated.query("SELECT durationMs FROM app_day_totals").use { assertTrue(it.moveToFirst()); assertEquals(60000L, it.getLong(0)) }
+        }
+    }
+
     @Test fun upgradeFromOnePreservesSessionsDailyCacheAndCheckpoint() {
         helper.createDatabase("migration-test", 1).apply {
             execSQL("INSERT INTO devices VALUES ('device-one','android',0,'UTC')")
@@ -30,7 +50,7 @@ class MigrationTest {
             execSQL("INSERT INTO collection_state (source,recordFromMs,checkpointMs,lastSuccessMs,enabled,status,detail) VALUES ('android_usage_events',0,15000,15000,1,'部分可用','fixture')")
             close()
         }
-        val migrated = helper.runMigrationsAndValidate("migration-test", 4, true, AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
+        val migrated = helper.runMigrationsAndValidate("migration-test", 5, true, AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
         migrated.query("SELECT durationMs FROM sessions WHERE sessionId='session-one'").use { assertTrue(it.moveToFirst()); assertEquals(15_000L, it.getLong(0)) }
         migrated.query("SELECT durationMs FROM daily_usage").use { assertTrue(it.moveToFirst()); assertEquals(15_000L, it.getLong(0)) }
         migrated.query("SELECT checkpointMs FROM collection_state").use { assertTrue(it.moveToFirst()); assertEquals(15_000L, it.getLong(0)) }
@@ -49,12 +69,12 @@ class MigrationTest {
                 VALUES ('session-one','device-one','identity-one',1000,1000,6000,5000,'UTC',0,'android_foreground','android_usage_events',0,0,'partial',1,0)""")
             close()
         }
-        val migrated = helper.runMigrationsAndValidate("migration-v2-test", 4, true, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
+        val migrated = helper.runMigrationsAndValidate("migration-v2-test", 5, true, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
         migrated.query("SELECT usageMs FROM historical_buckets WHERE bucketId='bucket-one'").use { assertTrue(it.moveToFirst()); assertEquals(5000L, it.getLong(0)) }
         migrated.query("SELECT durationMs FROM sessions WHERE sessionId='session-one'").use { assertTrue(it.moveToFirst()); assertEquals(5000L, it.getLong(0)) }
         migrated.close()
         val db = Room.databaseBuilder(InstrumentationRegistry.getInstrumentation().targetContext, AppDatabase::class.java, "migration-v2-test")
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4).build()
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5).build()
         val source = object : UsageEventSource {
             override fun hasAccess() = true
             override fun read(startMs: Long, endMs: Long) = EventRead.Available(emptyList())

@@ -60,12 +60,14 @@ import kotlinx.coroutines.withContext
     }
 }
 
-@Composable internal fun AppListScreen(apps: List<AppSummary>, manage: Boolean = false, onApp: (String) -> Unit) {
+@Composable internal fun AppListScreen(apps: List<AppSummary>, manage: Boolean = false, deviceLabels: Map<String, String> = emptyMap(), onApp: (String) -> Unit) {
     var search by rememberSaveable { mutableStateOf("") }
     var category by rememberSaveable { mutableStateOf("全部分类") }
     var filter by rememberSaveable { mutableStateOf(if (manage) "全部档案" else "可见应用") }
+    var device by rememberSaveable { mutableStateOf("全部设备") }
     val categories = listOf("全部分类") + apps.map { it.category }.distinct().sorted()
     val filtered = apps.filter {
+        (device == "全部设备" || deviceLabels[it.deviceId] == device) &&
         (category == "全部分类" || it.category == category) &&
         (it.displayName.contains(search, true) || it.packageName.contains(search, true)) &&
         when (filter) { "可见应用" -> !it.hidden; "已隐藏" -> it.hidden; "已忽略" -> it.ignored; "已安装" -> it.installationStatus == "installed"; "状态未知" -> it.installationStatus == "unknown"; else -> true }
@@ -77,14 +79,15 @@ import kotlinx.coroutines.withContext
             Choice(category, categories, { category = it }, Modifier.weight(1f))
             Choice(filter, listOf("可见应用", "全部档案", "已安装", "状态未知", "已隐藏", "已忽略"), { filter = it }, Modifier.weight(1f))
         }
+        if (deviceLabels.size > 1) Choice(device, listOf("全部设备") + deviceLabels.values, { device = it })
         LazyColumn(contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (filtered.isEmpty()) item { EmptyState("暂无应用", "") }
             items(filtered, key = { it.identityId }) { app ->
                 Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface) {
                     Column {
                         AppRow(app, filtered.indexOf(app) + 1, filtered.first().knownTotal) { onApp(app.identityId) }
-                        if (manage || app.category != "未分类" || app.ignored || app.signingChanged) Row(Modifier.padding(start = 62.dp, end = 16.dp, bottom = 12.dp)) {
-                            Text(listOfNotNull(app.category.takeIf { it != "未分类" }, "已隐藏".takeIf { app.hidden }, "已忽略".takeIf { app.ignored },
+                        if (deviceLabels.size > 1 || manage || app.category != "未分类" || app.ignored || app.signingChanged) Row(Modifier.padding(start = 62.dp, end = 16.dp, bottom = 12.dp)) {
+                            Text(listOfNotNull(deviceLabels[app.deviceId].takeIf { deviceLabels.size > 1 }, app.category.takeIf { it != "未分类" }, "已隐藏".takeIf { app.hidden }, "已忽略".takeIf { app.ignored },
                                 "签名待确认".takeIf { app.signingChanged }, installationText(app).takeIf { manage }).joinToString(" · "),
                                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
@@ -193,7 +196,7 @@ import kotlinx.coroutines.withContext
     }
 }
 
-@Composable internal fun AppDetailScreen(app: AppSummary, repo: UsageRepository, zone: ZoneId, categories: List<String>, runAction: RunAction, onDay: (LocalDate) -> Unit) {
+@Composable internal fun AppDetailScreen(app: AppSummary, repo: UsageRepository, zone: ZoneId, categories: List<String>, runAction: RunAction, deviceLabel: String? = null, local: Boolean = true, onDay: (LocalDate) -> Unit) {
     val days by remember(app.identityId) { repo.dao.observeAppDays(app.identityId) }.collectAsStateWithLifecycle(initialValue = emptyList())
     val adjustments by remember(app.identityId) { repo.dao.observeAdjustments(app.identityId) }.collectAsStateWithLifecycle(initialValue = emptyList())
     val today = LocalDate.now(zone)
@@ -212,7 +215,7 @@ import kotlinx.coroutines.withContext
             AppIcon(app, true)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(app.displayName, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text(installationText(app), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (local) installationText(app) else deviceLabel ?: "导入档案", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } }
         item { Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = MaterialTheme.shapes.large) {
@@ -238,12 +241,13 @@ import kotlinx.coroutines.withContext
             Column(Modifier.padding(horizontal = 20.dp)) {
                 ToggleRow("隐藏应用", app.hidden) { runAction { repo.updatePreference(app.identityId, hidden = it) } }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                ToggleRow("忽略后续采集", app.ignored) { runAction { repo.setIgnored(app.identityId, it) } }
+                if (local) ToggleRow("忽略后续采集", app.ignored) { runAction { repo.setIgnored(app.identityId, it) } }
             }
         } }
-        if (app.signingChanged) item { EntryRow("签名变化", "暂停写入，点击确认档案续接") { confirmSignature = true } }
+        if (local && app.signingChanged) item { EntryRow("签名变化", "暂停写入，点击确认档案续接") { confirmSignature = true } }
         item { EntryRow("补记／修正时长") { editingTime = true } }
         item { Expandable("档案信息", "记录与来源") {
+            if (deviceLabel != null) Text("来源  $deviceLabel", style = MaterialTheme.typography.bodySmall)
             Text("${app.packageName}\n首次记录  ${timeText(app.firstMs, zone)}\n最近前台  ${timeText(app.lastMs, zone)}", style = MaterialTheme.typography.bodySmall)
             Text("已记录  ${duration(app.recordedMs)}\n旧历史  ${duration(app.historicalMs)}\n手动修正  ${signedDuration(app.adjustmentMs)}", style = MaterialTheme.typography.bodySmall)
         } }

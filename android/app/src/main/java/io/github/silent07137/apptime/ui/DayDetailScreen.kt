@@ -76,13 +76,19 @@ private data class DisplayPeriod(val app: DaySession, val start: Long, val end: 
         }
         item { Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = MaterialTheme.shapes.large) {
             Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("当天用时", style = MaterialTheme.typography.labelLarge)
+                Text(when {
+                    dailyApps.isEmpty() -> "当天用时"
+                    dailyApps.all { it.source == "system" } -> "系统汇总"
+                    dailyApps.all { it.source == "events" } -> "已记录用时"
+                    else -> "当天汇总"
+                }, style = MaterialTheme.typography.labelLarge)
                 Text(if (dailyApps.isEmpty()) "未采集" else duration(dailyApps.sumOf { it.durationMs }), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
             }
         } }
         if (periods.isNotEmpty()) {
             item { HourChart(hours, zone, selectedHour, { selectedHour = if (selectedHour == it) -1 else it }) }
-            item { Expandable("分布说明", "时段已记录 ${duration(hours.sumOf { it.durationMs })}") {
+            item { Expandable("分布说明", "事件时段 ${duration(hours.sumOf { it.durationMs })}") {
+                Text("系统汇总和事件时段来自不同来源，更新时点与统计边界可能不同；事件缺少结束信号时还会包含暂计时长。", style = MaterialTheme.typography.bodySmall)
                 Text("小时图和时间线仅展示保存的前台事件。每日汇总、手动修正及缺少边界的记录无法还原为具体时段；空白小时表示没有已记录时段。", style = MaterialTheme.typography.bodySmall)
                 Text("报表时区：${zone.id}。多个应用同时在前台时分别计时。", style = MaterialTheme.typography.bodySmall)
             } }

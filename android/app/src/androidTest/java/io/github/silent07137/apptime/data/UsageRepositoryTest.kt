@@ -70,6 +70,30 @@ class UsageRepositoryTest {
         assertEquals(15_000L, db.usageDao().observeApps().first().single().recordedMs)
         assertEquals(2L, db.usageDao().session(sessionId("device-one", "personal", "A", 0))!!.revision)
     }
+    @Test fun activityStopWithoutPauseRevisesSavedOvercountAndMatchesSystemDay() = runBlocking {
+        val minute = 60_000L
+        clock = 80 * minute
+        val history = object : UsageHistorySource {
+            override fun read(startMs: Long, endMs: Long) = HistoryRead.Available(emptyList())
+            override fun readDaily(startMs: Long, endMs: Long) = HistoryRead.Available(listOf(
+                HistoricalBucket("A", 0, 86_400_000, 57 * minute, "android_usage_stats_daily")))
+        }
+        val withHistory = UsageRepository(db, source, { it }, "personal", { clock }, { zone }, history)
+        source.result = EventRead.Available(listOf(e(0, EventKind.RESUME)))
+        withHistory.collect()
+        val first = db.usageDao().observeApps().first().single()
+        assertEquals(80 * minute, first.recordedMs)
+        assertEquals(57 * minute, db.usageDao().appDay(first.identityId, "1970-01-01")!!.durationMs)
+        clock = 81 * minute
+        source.result = EventRead.Available(listOf(e(0, EventKind.RESUME), e(57 * minute, EventKind.STOP)))
+        repeat(3) { assertTrue(withHistory.collect()) }
+        assertEquals(57 * minute, db.usageDao().observeApps().first().single().recordedMs)
+        assertEquals(57 * minute, db.usageDao().appDay(first.identityId, "1970-01-01")!!.durationMs)
+        val session = db.usageDao().session(sessionId("device-one", "personal", "A", 0))!!
+        assertEquals(57 * minute, session.durationMs)
+        assertFalse(session.provisional)
+        assertEquals(2L, session.revision)
+    }
     @Test fun overlappingAnchorsAreUnionedPerIdentity() = runBlocking {
         source.result = EventRead.Available(listOf(e(0, EventKind.RESUME), e(10_000, EventKind.PAUSE)))
         repo.collect()

@@ -11,6 +11,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.first
 import java.time.LocalDate
 
+
 data class AppInspection(val name: String?, val installed: Boolean, val signingDigests: List<String> = emptyList())
 
 class UsageRepository(
@@ -25,12 +26,29 @@ class UsageRepository(
 ) {
     val dao = db.usageDao()
     private val mutex = Mutex()
+    suspend fun <T> withArchiveLock(action: suspend (AppDatabase) -> T): T = mutex.withLock { action(db) }
+    suspend fun rebuildArchiveCaches() {
+        val devices = dao.observeDevices().first().associateBy { it.deviceId }
+        val sql = db.openHelper.writableDatabase
+        sql.execSQL("DELETE FROM daily_usage")
+        sql.execSQL("DELETE FROM event_daily_usage")
+        sql.execSQL("DELETE FROM system_daily_supplements")
+        for ((id, sessions) in dao.allSessions().groupBy { it.identityId }) {
+            val zone = ZoneId.of(requireNotNull(devices[sessions.first().originDeviceId]).reportTimezone)
+            val intervals = sessions.map { Interval(it.startMs, it.endMs) }
+            dao.saveEventDays(UsageMath.daily(intervals, zone).map { (date, ms) -> EventDailyEntity(id, date.toString(), zone.id, ms) })
+            val start = intervals.minOf { it.startMs }; val end = intervals.maxOf { it.endMs }
+            dao.saveDays(UsageMath.daily(UsageMath.subtract(intervals, historyOwnership(id, start, end)), zone).map { (date, ms) -> DailyEntity(id, date.toString(), zone.id, ms) })
+            rebuildSystemSupplements(id, Instant.ofEpochMilli(start).atZone(zone).toLocalDate(), Instant.ofEpochMilli(end - 1).atZone(zone).toLocalDate(), zone)
+        }
+        dao.saveDailySyncState(DailySyncState(initialDone = false, eventRebuilt = true))
+    }
     fun hasAccess() = source.hasAccess()
 
     suspend fun collect(): Boolean = mutex.withLock {
         val end = now()
         val device = dao.device() ?: DeviceEntity(UUID.randomUUID().toString(), createdAt = end, reportTimezone = timezone().id).also { dao.insertDevice(it) }
-        if (inspectApp != null) for (identity in dao.identities()) observeIdentity(identity)
+        if (inspectApp != null) for (identity in dao.identities().filter { it.deviceId == device.deviceId }) observeIdentity(identity)
         val storedState = dao.state() ?: CollectionState(recordFromMs = end)
         val oldState = if (!storedState.enabled && source.hasAccess()) storedState.copy(recordFromMs = end, enabled = true) else storedState
         rebuildEventDaysLocked(device)
@@ -55,7 +73,7 @@ class UsageRepository(
                 db.withTransaction {
                     dao.saveState(oldState.copy(status = "不可用", detail = read.reason))
                     val start = oldState.checkpointMs ?: oldState.recordFromMs
-                    if (oldState.enabled && end > start) dao.saveCoverage(CoverageEntity("unavailable:$start", device.deviceId, start, end, "unavailable", read.reason))
+                    if (oldState.enabled && end > start) dao.saveCoverage(CoverageEntity("${device.deviceId}:unavailable:$start", device.deviceId, start, end, "unavailable", read.reason))
                 }
                 false
             }
@@ -65,7 +83,7 @@ class UsageRepository(
                     db.withTransaction {
                         dao.saveState(oldState.copy(status = "未采集", detail = "系统未返回事件，已有记录保留；无法判断是否无使用"))
                         val start = oldState.checkpointMs ?: oldState.recordFromMs
-                        if (end > start) dao.saveCoverage(CoverageEntity("empty:$start", device.deviceId, start, end, "unavailable", "空事件查询，完整性未知"))
+                        if (end > start) dao.saveCoverage(CoverageEntity("${device.deviceId}:empty:$start", device.deviceId, start, end, "unavailable", "空事件查询，完整性未知"))
                     }
                     false
                 } else {
@@ -132,8 +150,8 @@ class UsageRepository(
                             rebuildSystemSupplements(identityId, firstDate, lastDate, zone)
                         }
                         val previous = oldState.checkpointMs
-                        if (previous != null && previous < ownedStart) dao.saveCoverage(CoverageEntity("late:$previous", device.deviceId, previous, ownedStart, "unavailable", "超过回查窗口，可能存在历史缺口"))
-                        dao.saveCoverage(CoverageEntity("query:$ownedStart", device.deviceId, ownedStart, end, "partial", "系统事件完整性未知；分屏按各应用前台口径"))
+                        if (previous != null && previous < ownedStart) dao.saveCoverage(CoverageEntity("${device.deviceId}:late:$previous", device.deviceId, previous, ownedStart, "unavailable", "超过回查窗口，可能存在历史缺口"))
+                        dao.saveCoverage(CoverageEntity("${device.deviceId}:query:$ownedStart", device.deviceId, ownedStart, end, "partial", "系统事件完整性未知；分屏按各应用前台口径"))
                         dao.saveState(oldState.copy(checkpointMs = end, lastSuccessMs = end, status = "部分可用",
                             detail = "已保存系统返回的前台事件；未结束会话暂计至本次采集边界。无法保证事件完整。"))
                     }
@@ -317,7 +335,8 @@ class UsageRepository(
     suspend fun updatePreference(id: String, category: String? = null, hidden: Boolean? = null) = mutex.withLock {
         val old = dao.preference(id) ?: AppPreferenceEntity(id)
         require(category == null || category.trim().length in 1..24) { "分类名称需为 1–24 个字" }
-        dao.savePreference(old.copy(category = category?.trim() ?: old.category, hidden = hidden ?: old.hidden))
+        val updated = old.copy(category = category?.trim() ?: old.category, hidden = hidden ?: old.hidden)
+        if (updated != old) dao.savePreference(updated.copy(revision = old.revision + 1))
     }
 
     suspend fun setIgnored(id: String, ignored: Boolean) = mutex.withLock {
@@ -325,8 +344,8 @@ class UsageRepository(
             val old = dao.preference(id) ?: AppPreferenceEntity(id)
             if (old.ignored == ignored) return@withTransaction
             if (ignored) dao.saveIgnorePeriod(IgnorePeriodEntity(UUID.randomUUID().toString(), id, now()))
-            else dao.ignorePeriods(id).filter { it.endMs == null }.forEach { dao.saveIgnorePeriod(it.copy(endMs = maxOf(now(), it.startMs))) }
-            dao.savePreference(old.copy(ignored = ignored))
+            else dao.ignorePeriods(id).filter { it.endMs == null }.forEach { dao.saveIgnorePeriod(it.copy(endMs = maxOf(now(), it.startMs), revision = it.revision + 1)) }
+            dao.savePreference(old.copy(ignored = ignored, revision = old.revision + 1))
         }
     }
 

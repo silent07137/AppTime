@@ -6,7 +6,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.util.UUID
 
-enum class EventKind { RESUME, PAUSE, SCREEN_OFF, SCREEN_ON, LOCK, UNLOCK, SHUTDOWN, STARTUP }
+enum class EventKind { RESUME, PAUSE, STOP, SCREEN_OFF, SCREEN_ON, LOCK, UNLOCK, SHUTDOWN, STARTUP }
 
 data class UsageEvent(val timeMs: Long, val kind: EventKind, val packageName: String = "", val component: String = "")
 
@@ -38,6 +38,9 @@ object UsageReplay {
         val open = linkedMapOf<String, Open>()
         val sessions = mutableListOf<Session>()
         val discarded = mutableListOf<Pair<String, Long>>()
+        // onStop can arrive after a replacement instance of the same class resumes.
+        // A stop following a known pause belongs to that paused activity, not its replacement.
+        val stopsAfterPause = mutableSetOf<Pair<String, String>>()
         var unmatched = 0
         var screenOn = true
         var locked = false
@@ -66,9 +69,18 @@ object UsageReplay {
                     state.components += event.component
                 }
                 EventKind.PAUSE -> {
+                    stopsAfterPause += event.packageName to event.component
                     val state = open[event.packageName]
                     if (state == null || !state.components.remove(event.component)) unmatched++
                     else if (state.components.isEmpty()) state.pendingEnd = event.timeMs
+                }
+                EventKind.STOP -> {
+                    if (!stopsAfterPause.remove(event.packageName to event.component)) {
+                        val state = open[event.packageName]
+                        if (state != null && state.components.remove(event.component) && state.components.isEmpty()) {
+                            finish(event.packageName, event.timeMs)
+                        }
+                    }
                 }
                 EventKind.SCREEN_OFF, EventKind.LOCK, EventKind.SHUTDOWN -> {
                     for (pkg in open.keys.toList()) finish(pkg, open[pkg]?.pendingEnd ?: event.timeMs)
@@ -80,6 +92,7 @@ object UsageReplay {
                     // Missing shutdown: the closing time is unknown; never extend through downtime.
                     open.forEach { (pkg, state) -> discarded += pkg to state.anchor }
                     open.clear()
+                    stopsAfterPause.clear()
                     screenOn = true
                     locked = false
                 }

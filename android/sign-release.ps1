@@ -2,7 +2,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$PropertiesFile,
     [string]$InputApk = "$PSScriptRoot/app/build/outputs/apk/release/app-release.apk",
-    [string]$OutputApk = "$PSScriptRoot/app/build/outputs/apk/release/AppTime-v1.2.0.apk"
+    [string]$OutputApk = "$PSScriptRoot/app/build/outputs/apk/release/AppTime-v1.3.0.apk"
 )
 
 $ErrorActionPreference = 'Stop'

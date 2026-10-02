@@ -44,6 +44,22 @@ class UsageTest {
         assertEquals(first.recordId("device", "personal"), closed.recordId("device", "personal"))
         assertEquals(15_000L, closed.durationMs)
     }
+    @Test fun stopWithoutPauseClosesTheActivityInsteadOfExtendingToQueryEnd() {
+        val minute = 60_000L
+        val result = UsageReplay.replay(listOf(e(0, EventKind.RESUME), e(57 * minute, EventKind.STOP)), 0, 80 * minute)
+        assertEquals(57 * minute, result.sessions.single().durationMs)
+        assertFalse(result.sessions.single().provisional)
+    }
+    @Test fun lateStopOfPausedInstanceDoesNotCloseResumedInstanceOfTheSameClass() {
+        val events = listOf(e(0, EventKind.RESUME), e(10_000, EventKind.PAUSE),
+            e(10_200, EventKind.RESUME), e(10_500, EventKind.STOP), e(30_000, EventKind.PAUSE))
+        assertEquals(30_000L, UsageReplay.replay(events, 0, 40_000).sessions.single().durationMs)
+    }
+    @Test fun stopClosesOnlyItsOwnActivityWhenAnotherActivityIsStillResumed() {
+        val events = listOf(e(0, EventKind.RESUME), e(10_000, EventKind.RESUME, component = "Detail"),
+            e(11_000, EventKind.STOP), e(30_000, EventKind.PAUSE, component = "Detail"))
+        assertEquals(30_000L, UsageReplay.replay(events, 0, 40_000).sessions.single().durationMs)
+    }
     @Test fun screenOffAndLockCloseSessions() {
         for (kind in listOf(EventKind.SCREEN_OFF, EventKind.LOCK, EventKind.SHUTDOWN)) {
             val sessions = UsageReplay.replay(listOf(e(0, EventKind.RESUME), e(5_000, kind), e(6_000, EventKind.RESUME)), 0, 20_000).sessions

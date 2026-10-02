@@ -7,6 +7,7 @@
 - 应用身份：本地 UUID；设备 UUID + 用户范围 + packageName 唯一。名称不参与合并。
 - 会话键：UTF-8 的 `deviceId + NUL + profile + NUL + packageName + NUL + anchorMs + NUL + android_usage_events`，经 Java UUID.nameUUIDFromBytes（UUID v3）生成。anchorMs 为原始应用 resume 起点，startMs 裁剪到固定 recordFromMs。
 - 组件按公开 API 的 className 跟踪；同包活动集合不为空时只有一条应用会话。公开 SDK 没有稳定 Activity 实例 ID，同一组件的多个实例可能无法完整区分，因此仍标记 partial，不调用隐藏 API。
+- 停止事件可作为缺少暂停时的结束边界。已收到暂停而尚未收到停止的组件，其后续停止先视为旧页面的信号，避免关闭同类新页面；同类多实例与缺失事件仍有歧义，不能保证完整覆盖。
 - 组件全部暂停后，下一相关事件若是同包 1 秒内 resume，可连接为一条估算会话；非零间隔标记 transitionEstimated。该估算会计入极短组件过渡间隔。
 - screen off、keyguard shown、shutdown 结束会话；startup 缺失结束信号时丢弃无法确认的开放尾段并给已有暂定记录写 deleted/revision。
 - 未结束会话仅到本次 queryEnd，provisional=true；后续同键替换，可缩短。
@@ -30,6 +31,8 @@ source 为 android_usage_stats_best / android_usage_stats_daily，timezone 与 q
 “已记录”是本机保存的前台事件按应用做区间并集、按档案时区切日后的累计；即使这些事件落在旧历史汇总的范围内，记录本身仍保留并显示。升级到 v1.1.0 时从已有会话重建此缓存；后续会话修订同步重建。它与“可追溯旧历史”可能重叠，不能直接相加。“已知总计”仍用扣除历史拥有范围后的事件缓存加有效历史汇总，避免重复累计。
 
 首次同步单独请求系统 `INTERVAL_DAILY` 可用的全部逐日汇总，之后每次采集回查最近 31 天；手动“重新读取全部历史”可重读完整可用范围。同一应用/日期的重复查询覆盖原观测，不累加；短时更小的系统返回值不会清除已保存值。系统没有返回某应用某天时，逐日页面显示保存的事件日汇总。宽范围旧汇总不按比例拆成日期。设备变更时区后，旧系统日桶的原始时区无法确认，日期按档案报表时区标注，可能有偏差。
+
+每日详情分别标注系统汇总和事件时段的来源。系统汇总与事件时段的范围、更新时点及暂计状态可能不同；不按比例改写时间线以强行匹配汇总。
 
 [官方 API](https://developer.android.com/reference/android/app/usage/UsageStatsManager#queryUsageStats(int,%20long,%20long)) 说明返回范围可能扩展到完整聚合周期，[INTERVAL_BEST](https://developer.android.com/reference/android/app/usage/UsageStatsManager#INTERVAL_BEST) 由系统选取适合范围的周期。
 

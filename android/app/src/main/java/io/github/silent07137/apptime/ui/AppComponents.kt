@@ -44,11 +44,11 @@ import kotlinx.coroutines.withContext
 
 internal val AppSummary.knownTotal: Long get() = (durationMs + historicalMs + adjustmentMs).coerceAtLeast(0)
 
-@Composable internal fun TotalCard(apps: List<AppSummary>, hasSessions: Boolean, history: HistoryImportState?, zone: ZoneId, onInfo: () -> Unit) {
+@Composable internal fun TotalCard(apps: List<AppSummary>, hasSessions: Boolean, history: HistoryImportState?, zone: ZoneId, multipleDevices: Boolean = false, onInfo: () -> Unit) {
     Card(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
         Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("已知总计", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Text(if (multipleDevices) "各设备已知总计" else "已知总计", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 IconButton(onClick = onInfo, modifier = Modifier.size(40.dp).semantics { contentDescription = "累计数据说明" }) { Glyph(Symbol.INFO) }
             }
             Text(if (apps.isEmpty()) "未采集" else duration(apps.sumOf { it.knownTotal }), fontSize = 38.sp, lineHeight = 46.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
@@ -151,9 +151,10 @@ internal val AppSummary.knownTotal: Long get() = (durationMs + historicalMs + ad
     }
 }
 
-@Composable internal fun DataNotes(state: CollectionState?, history: HistoryImportState?, gaps: Int, zone: ZoneId) {
+@Composable internal fun DataNotes(state: CollectionState?, history: HistoryImportState?, gaps: Int, zone: ZoneId, multipleDevices: Boolean = false) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("已记录是保存的前台事件累计；它与旧历史可能重叠，不能直接相加。已知总计按历史范围去重。每日时长优先采用系统逐日统计，缺失时使用事件记录。", style = MaterialTheme.typography.bodyMedium)
+        if (multipleDevices) Text("总计为各设备用时之和，同时使用多台设备会分别计时。每日汇总保留来源设备的报表日期；查看具体应用时采用其来源时区。", style = MaterialTheme.typography.bodySmall)
         Text("记录起点  ${timeText(state?.takeIf { it.enabled }?.recordFromMs, zone)}\n最后保存  ${timeText(state?.lastSuccessMs, zone)}\n采集状态  ${state?.status ?: "未采集"}", style = MaterialTheme.typography.bodySmall)
         if (gaps > 0) Text("$gaps 段查询范围不可用或完整性未知；记录已保留。", style = MaterialTheme.typography.bodySmall)
         if (history != null) Text("历史查询  ${if (history.requestedStartMs == 0L) "系统保留的最早记录" else timeText(history.requestedStartMs, zone)} → ${timeText(history.requestedEndMs, zone)}\n实际返回  ${timeText(history.returnedStartMs, zone)} → ${timeText(history.returnedEndMs, zone)}\n采用 ${history.acceptedBuckets} 个汇总，跳过 ${history.skippedBuckets} 个。", style = MaterialTheme.typography.bodySmall)

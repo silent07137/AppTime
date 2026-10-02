@@ -13,6 +13,11 @@ jobs:
         working-directory: android
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.311'
+      - name: Verify portable backup fixture
+        run: dotnet run --project ../specs/tools/BackupFixture/BackupFixture.csproj -- ../test-fixtures/backup-v1
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

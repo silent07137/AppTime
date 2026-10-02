@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit
 
 class AppTimeApplication : Application() {
     val catalog by lazy { AndroidAppCatalog(this) }
-    val database by lazy { Room.databaseBuilder(this, AppDatabase::class.java, "apptime.db").addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4).build() }
+    val database by lazy { Room.databaseBuilder(this, AppDatabase::class.java, "apptime.db").addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5).build() }
     val repository by lazy {
         UsageRepository(database, AndroidUsageSource(this), { pkg ->
             try {

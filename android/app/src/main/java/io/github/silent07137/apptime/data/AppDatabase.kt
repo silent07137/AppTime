@@ -68,13 +68,17 @@ data class HistoryImportState(@PrimaryKey val source: String = "android_usage_st
     val lastAttemptMs: Long, val status: String, val detail: String)
 
 @Entity(tableName = "app_preferences", foreignKeys = [ForeignKey(entity = IdentityEntity::class, parentColumns = ["identityId"], childColumns = ["identityId"], onDelete = ForeignKey.RESTRICT)])
-data class AppPreferenceEntity(@PrimaryKey val identityId: String, val category: String = "未分类", val hidden: Boolean = false, val ignored: Boolean = false)
+data class AppPreferenceEntity(@PrimaryKey val identityId: String, val category: String = "未分类", val hidden: Boolean = false, val ignored: Boolean = false, @ColumnInfo(defaultValue = "1") val revision: Long = 1)
 
 @Entity(tableName = "ignore_periods", foreignKeys = [ForeignKey(entity = IdentityEntity::class, parentColumns = ["identityId"], childColumns = ["identityId"], onDelete = ForeignKey.RESTRICT)], indices = [Index("identityId")])
-data class IgnorePeriodEntity(@PrimaryKey val periodId: String, val identityId: String, val startMs: Long, val endMs: Long? = null)
+data class IgnorePeriodEntity(@PrimaryKey val periodId: String, val identityId: String, val startMs: Long, val endMs: Long? = null, @ColumnInfo(defaultValue = "1") val revision: Long = 1)
 
 @Entity(tableName = "manual_adjustments", foreignKeys = [ForeignKey(entity = IdentityEntity::class, parentColumns = ["identityId"], childColumns = ["identityId"], onDelete = ForeignKey.RESTRICT)], indices = [Index(value = ["identityId", "reportDate"])])
-data class AdjustmentEntity(@PrimaryKey val adjustmentId: String, val identityId: String, val reportDate: String, val timezone: String, val deltaMs: Long, val note: String, val createdAtMs: Long)
+data class AdjustmentEntity(@PrimaryKey val adjustmentId: String, val identityId: String, val reportDate: String, val timezone: String, val deltaMs: Long, val note: String, val createdAtMs: Long,
+    @ColumnInfo(defaultValue = "1") val revision: Long = 1, @ColumnInfo(defaultValue = "0") val deleted: Boolean = false)
+
+@Entity(tableName = "local_archive_state")
+data class LocalArchiveState(@PrimaryKey val id: Int = 1, val localDeviceId: String? = null)
 
 @Entity(tableName = "app_observations", foreignKeys = [ForeignKey(entity = IdentityEntity::class, parentColumns = ["identityId"], childColumns = ["identityId"], onDelete = ForeignKey.RESTRICT)])
 data class AppObservationEntity(@PrimaryKey val identityId: String, val status: String, val signingDigest: String?, val signingChanged: Boolean, val observedAtMs: Long)
@@ -86,13 +90,13 @@ const val DAILY_VIEW = """SELECT identityId, reportDate, SUM(durationMs) AS dura
         LEFT JOIN system_daily_supplements p ON p.identityId = s.identityId AND p.reportDate = s.reportDate
         UNION ALL SELECT e.identityId, e.reportDate, e.durationMs, 'events' AS source FROM event_daily_usage e
         WHERE NOT EXISTS (SELECT 1 FROM system_daily_usage s WHERE s.identityId = e.identityId AND s.reportDate = e.reportDate)
-        UNION ALL SELECT identityId, reportDate, deltaMs AS durationMs, 'manual' AS source FROM manual_adjustments
+        UNION ALL SELECT identityId, reportDate, deltaMs AS durationMs, 'manual' AS source FROM manual_adjustments WHERE deleted = 0
     ) GROUP BY identityId, reportDate"""
 
 @DatabaseView(value = DAILY_VIEW, viewName = "app_day_totals")
 data class AppDayTotal(val identityId: String, val reportDate: String, val durationMs: Long, val source: String)
 
-data class AppSummary(val identityId: String, val packageName: String, val displayName: String, val durationMs: Long, val recordedMs: Long, val historicalMs: Long, val historicalBuckets: Int, val firstMs: Long?, val lastMs: Long?,
+data class AppSummary(val identityId: String, val deviceId: String, val packageName: String, val displayName: String, val durationMs: Long, val recordedMs: Long, val historicalMs: Long, val historicalBuckets: Int, val firstMs: Long?, val lastMs: Long?,
     val adjustmentMs: Long, val category: String, val hidden: Boolean, val ignored: Boolean, val installationStatus: String, val signingChanged: Boolean)
 
 data class DayAppUsage(val identityId: String, val packageName: String, val displayName: String, val category: String, val durationMs: Long, val source: String)
@@ -110,9 +114,9 @@ interface UsageDao {
     @Query("SELECT * FROM app_observations WHERE identityId = :id") suspend fun observation(id: String): AppObservationEntity?
     @Upsert suspend fun saveObservation(observation: AppObservationEntity)
     @Upsert suspend fun saveAdjustment(adjustment: AdjustmentEntity)
-    @Query("SELECT * FROM manual_adjustments WHERE adjustmentId = :id") suspend fun adjustment(id: String): AdjustmentEntity?
-    @Query("DELETE FROM manual_adjustments WHERE adjustmentId = :id") suspend fun deleteAdjustment(id: String)
-    @Query("SELECT * FROM manual_adjustments WHERE identityId = :id ORDER BY createdAtMs DESC") fun observeAdjustments(id: String): Flow<List<AdjustmentEntity>>
+    @Query("SELECT * FROM manual_adjustments WHERE adjustmentId = :id AND deleted = 0") suspend fun adjustment(id: String): AdjustmentEntity?
+    @Query("UPDATE manual_adjustments SET deleted = 1, revision = revision + 1 WHERE adjustmentId = :id AND deleted = 0") suspend fun deleteAdjustment(id: String)
+    @Query("SELECT * FROM manual_adjustments WHERE identityId = :id AND deleted = 0 ORDER BY createdAtMs DESC") fun observeAdjustments(id: String): Flow<List<AdjustmentEntity>>
     @Query("SELECT identityId, reportDate, MAX(0, durationMs) AS durationMs, source FROM app_day_totals WHERE identityId = :id AND reportDate = :date") suspend fun appDay(id: String, date: String): AppDayTotal?
     @Query("""SELECT v.identityId, i.packageName, i.displayName, COALESCE(p.category, '未分类') AS category, MAX(0, v.durationMs) AS durationMs, v.source
         FROM app_day_totals v JOIN app_identities i ON i.identityId = v.identityId LEFT JOIN app_preferences p ON p.identityId = v.identityId
@@ -124,7 +128,9 @@ interface UsageDao {
         WHERE s.deleted = 0 AND s.startMs < :end AND s.endMs > :start AND (:id IS NULL OR s.identityId = :id)
         AND (:category IS NULL OR COALESCE(p.category, '未分类') = :category) ORDER BY s.startMs""")
     fun observeDaySessions(start: Long, end: Long, id: String? = null, category: String? = null): Flow<List<DaySession>>
-    @Query("SELECT * FROM devices LIMIT 1") suspend fun device(): DeviceEntity?
+    @Query("SELECT * FROM devices WHERE deviceId = COALESCE((SELECT localDeviceId FROM local_archive_state WHERE id = 1), (SELECT deviceId FROM devices ORDER BY createdAt, deviceId LIMIT 1))") suspend fun device(): DeviceEntity?
+    @Upsert suspend fun saveLocalState(state: LocalArchiveState)
+    @Query("SELECT * FROM devices ORDER BY createdAt, deviceId") fun observeDevices(): Flow<List<DeviceEntity>>
     @Insert suspend fun insertDevice(device: DeviceEntity)
     @Query("SELECT * FROM collection_state LIMIT 1") suspend fun state(): CollectionState?
     @Query("SELECT * FROM collection_state LIMIT 1") fun observeState(): Flow<CollectionState?>
@@ -168,14 +174,14 @@ interface UsageDao {
             AND o.startMs <= h.startMs AND o.endMs >= h.endMs
             AND (o.startMs < h.startMs OR o.endMs > h.endMs OR
                 (o.source = 'android_usage_stats_best' AND h.source != 'android_usage_stats_best'))))
-        SELECT i.identityId, i.packageName, i.displayName,
+        SELECT i.identityId, i.deviceId, i.packageName, i.displayName,
         COALESCE((SELECT SUM(d.durationMs) FROM daily_usage d WHERE d.identityId = i.identityId), 0) AS durationMs,
         COALESCE((SELECT SUM(e.durationMs) FROM event_daily_usage e WHERE e.identityId = i.identityId), 0) AS recordedMs,
         COALESCE((SELECT SUM(h.usageMs) FROM effective_history h WHERE h.identityId = i.identityId), 0) AS historicalMs,
         (SELECT COUNT(*) FROM effective_history h WHERE h.identityId = i.identityId) AS historicalBuckets,
         (SELECT MIN(s.startMs) FROM sessions s WHERE s.identityId = i.identityId AND s.deleted = 0) AS firstMs,
         (SELECT MAX(s.endMs) FROM sessions s WHERE s.identityId = i.identityId AND s.deleted = 0) AS lastMs,
-        COALESCE((SELECT SUM(a.deltaMs) FROM manual_adjustments a WHERE a.identityId = i.identityId), 0) AS adjustmentMs,
+        COALESCE((SELECT SUM(a.deltaMs) FROM manual_adjustments a WHERE a.identityId = i.identityId AND a.deleted = 0), 0) AS adjustmentMs,
         COALESCE(p.category, '未分类') AS category, COALESCE(p.hidden, 0) AS hidden, COALESCE(p.ignored, 0) AS ignored,
         COALESCE(o.status, 'unknown') AS installationStatus, COALESCE(o.signingChanged, 0) AS signingChanged
         FROM app_identities i LEFT JOIN app_preferences p ON p.identityId = i.identityId LEFT JOIN app_observations o ON o.identityId = i.identityId
@@ -192,10 +198,23 @@ interface UsageDao {
 }
 
 @Database(entities = [DeviceEntity::class, IdentityEntity::class, SessionEntity::class, DailyEntity::class, EventDailyEntity::class, SystemDailyEntity::class, DailySyncState::class, CollectionState::class, CoverageEntity::class, HistoricalBucketEntity::class, HistoryImportState::class,
-    AppPreferenceEntity::class, IgnorePeriodEntity::class, AdjustmentEntity::class, AppObservationEntity::class, SystemDaySupplementEntity::class], views = [AppDayTotal::class], version = 4, exportSchema = true)
+    AppPreferenceEntity::class, IgnorePeriodEntity::class, AdjustmentEntity::class, AppObservationEntity::class, SystemDaySupplementEntity::class, LocalArchiveState::class], views = [AppDayTotal::class], version = 5, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun usageDao(): UsageDao
     companion object {
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE app_preferences ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE ignore_periods ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE manual_adjustments ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE manual_adjustments ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("CREATE TABLE local_archive_state (id INTEGER NOT NULL PRIMARY KEY, localDeviceId TEXT)")
+                db.execSQL("INSERT INTO local_archive_state SELECT 1, deviceId FROM devices ORDER BY createdAt, deviceId LIMIT 1")
+                db.execSQL("UPDATE coverage SET coverageId = deviceId || ':' || coverageId")
+                db.execSQL("DROP VIEW app_day_totals")
+                db.execSQL("CREATE VIEW `app_day_totals` AS $DAILY_VIEW")
+            }
+        }
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("""CREATE TABLE IF NOT EXISTS app_preferences (identityId TEXT NOT NULL PRIMARY KEY, category TEXT NOT NULL, hidden INTEGER NOT NULL, ignored INTEGER NOT NULL,
@@ -211,7 +230,7 @@ abstract class AppDatabase : RoomDatabase() {
                     FOREIGN KEY(identityId) REFERENCES app_identities(identityId) ON UPDATE NO ACTION ON DELETE RESTRICT)""")
                 db.execSQL("""CREATE TABLE IF NOT EXISTS system_daily_supplements (identityId TEXT NOT NULL, reportDate TEXT NOT NULL, durationMs INTEGER NOT NULL,
                     PRIMARY KEY(identityId, reportDate), FOREIGN KEY(identityId) REFERENCES app_identities(identityId) ON UPDATE NO ACTION ON DELETE RESTRICT)""")
-                db.execSQL("CREATE VIEW `app_day_totals` AS $DAILY_VIEW")
+                db.execSQL("CREATE VIEW `app_day_totals` AS ${DAILY_VIEW.replace("FROM manual_adjustments WHERE deleted = 0", "FROM manual_adjustments")}")
             }
         }
         val MIGRATION_1_2 = object : Migration(1, 2) {

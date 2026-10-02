@@ -9,6 +9,9 @@ local.properties
 signing.properties
 *.hprof
 *.atbackup
+!test-fixtures/backup-v1/golden.atbackup
+**/bin/
+**/obj/
 artifacts/
 /AppTime_Codex开发文档.md
 .DS_Store

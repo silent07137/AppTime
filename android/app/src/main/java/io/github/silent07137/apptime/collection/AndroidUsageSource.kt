@@ -26,6 +26,7 @@ class AndroidUsageSource(private val context: Context) : UsageEventSource {
                 val kind = when (raw.eventType) {
                     UsageEvents.Event.ACTIVITY_RESUMED -> EventKind.RESUME
                     UsageEvents.Event.ACTIVITY_PAUSED -> EventKind.PAUSE
+                    UsageEvents.Event.ACTIVITY_STOPPED -> EventKind.STOP
                     UsageEvents.Event.SCREEN_NON_INTERACTIVE -> EventKind.SCREEN_OFF
                     UsageEvents.Event.SCREEN_INTERACTIVE -> EventKind.SCREEN_ON
                     UsageEvents.Event.KEYGUARD_SHOWN -> EventKind.LOCK
