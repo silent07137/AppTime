@@ -13,8 +13,8 @@ android {
         applicationId = "io.github.silent07137.apptime"
         minSdk = 29
         targetSdk = 36
-        versionCode = 10300
-        versionName = "1.3.0"
+        versionCode = 10301
+        versionName = "1.3.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         resValue("string", "app_name", "AppTime")
     }

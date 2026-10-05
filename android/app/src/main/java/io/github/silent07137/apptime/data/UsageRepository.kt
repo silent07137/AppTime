@@ -29,10 +29,18 @@ class UsageRepository(
     suspend fun <T> withArchiveLock(action: suspend (AppDatabase) -> T): T = mutex.withLock { action(db) }
     suspend fun rebuildArchiveCaches() {
         val devices = dao.observeDevices().first().associateBy { it.deviceId }
+        val identities = dao.identities().associateBy { it.identityId }
         val sql = db.openHelper.writableDatabase
         sql.execSQL("DELETE FROM daily_usage")
         sql.execSQL("DELETE FROM event_daily_usage")
         sql.execSQL("DELETE FROM system_daily_supplements")
+        for (snapshot in dao.allSystemDays()) {
+            val owner = requireNotNull(identities[snapshot.identityId])
+            val zone = ZoneId.of(requireNotNull(devices[owner.deviceId]).reportTimezone)
+            val aligned = HistoricalPolicy.isCalendarDay(snapshot.bucketStartMs, snapshot.bucketEndMs,
+                LocalDate.parse(snapshot.reportDate), zone)
+            if (snapshot.calendarAligned != aligned) dao.setCalendarAligned(snapshot.identityId, snapshot.reportDate, aligned)
+        }
         for ((id, sessions) in dao.allSessions().groupBy { it.identityId }) {
             val zone = ZoneId.of(requireNotNull(devices[sessions.first().originDeviceId]).reportTimezone)
             val intervals = sessions.map { Interval(it.startMs, it.endMs) }
@@ -51,7 +59,7 @@ class UsageRepository(
         if (inspectApp != null) for (identity in dao.identities().filter { it.deviceId == device.deviceId }) observeIdentity(identity)
         val storedState = dao.state() ?: CollectionState(recordFromMs = end)
         val oldState = if (!storedState.enabled && source.hasAccess()) storedState.copy(recordFromMs = end, enabled = true) else storedState
-        rebuildEventDaysLocked(device)
+        rebuildEventDaysLocked()
         if (oldState.enabled && source.hasAccess()) syncSystemDaysLocked(device, end)
         val ownedStart = maxOf(oldState.recordFromMs, end - 48 * HOUR_MS)
         // Pre-read supplies an actual resume anchor; no guessed start at a query boundary.
@@ -177,17 +185,11 @@ class UsageRepository(
         historyImported || dailyImported
     }
 
-    private suspend fun rebuildEventDaysLocked(device: DeviceEntity) {
+    private suspend fun rebuildEventDaysLocked() {
         val sync = dao.dailySyncState() ?: DailySyncState()
         if (sync.eventRebuilt) return
-        val zone = ZoneId.of(device.reportTimezone)
         db.withTransaction {
-            dao.allSessions().groupBy { it.identityId }.forEach { (identityId, sessions) ->
-                val intervals = sessions.filter { it.endMs > it.startMs }.map { Interval(it.startMs, it.endMs) }
-                dao.saveEventDays(UsageMath.daily(intervals, zone).map { (date, duration) ->
-                    EventDailyEntity(identityId, date.toString(), zone.id, duration)
-                })
-            }
+            rebuildArchiveCaches()
             dao.saveDailySyncState(sync.copy(eventRebuilt = true))
         }
     }
@@ -216,7 +218,8 @@ class UsageRepository(
                 val previous = dao.systemDay(identity.identityId, date.toString())
                 if (previous == null || bucket.usageMs > previous.durationMs) {
                     rows += SystemDailyEntity(identity.identityId, date.toString(), zone.id, bucket.usageMs,
-                        bucket.startMs, bucket.endMs, attempt)
+                        bucket.startMs, bucket.endMs, attempt,
+                        calendarAligned = HistoricalPolicy.isCalendarDay(bucket.startMs, bucket.endMs, date, zone))
                 }
             }
             if (rows.isNotEmpty()) dao.saveSystemDays(rows)

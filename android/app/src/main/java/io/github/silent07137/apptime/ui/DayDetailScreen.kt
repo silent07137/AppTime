@@ -88,7 +88,8 @@ private data class DisplayPeriod(val app: DaySession, val start: Long, val end: 
         if (periods.isNotEmpty()) {
             item { HourChart(hours, zone, selectedHour, { selectedHour = if (selectedHour == it) -1 else it }) }
             item { Expandable("分布说明", "事件时段 ${duration(hours.sumOf { it.durationMs })}") {
-                Text("系统汇总和事件时段来自不同来源，更新时点与统计边界可能不同；事件缺少结束信号时还会包含暂计时长。", style = MaterialTheme.typography.bodySmall)
+                Text("每日数据和时间分布按报表时区的午夜划分。跨日的系统统计桶仅保留原始汇总，不算作某一天的用时。", style = MaterialTheme.typography.bodySmall)
+                Text("系统汇总和事件时段来自不同来源，完整性和更新时点可能不同；事件缺少结束信号时还会包含暂计时长。", style = MaterialTheme.typography.bodySmall)
                 Text("小时图和时间线仅展示保存的前台事件。每日汇总、手动修正及缺少边界的记录无法还原为具体时段；空白小时表示没有已记录时段。", style = MaterialTheme.typography.bodySmall)
                 Text("报表时区：${zone.id}。多个应用同时在前台时分别计时。", style = MaterialTheme.typography.bodySmall)
             } }

@@ -254,7 +254,7 @@ class ArchiveService(private val context: Context, private val repo: UsageReposi
                 validate(table, entry)
                 val predicate = keys.joinToString(" AND ") { "`${it.name}` = ?" }
                 val pk = keys.map { values[columns.indexOf(it)] }.toTypedArray()
-                val existing = if (merge) sql.query("SELECT * FROM `$table` WHERE $predicate", pk).use { if (it.moveToFirst()) row(it) else null } else null
+                val existing = if (merge) sql.query("SELECT ${COLUMNS.getValue(table).joinToString { "`$it`" }} FROM `$table` WHERE $predicate", pk).use { if (it.moveToFirst()) row(it) else null } else null
                 var write = true
                 if (existing != null) {
                     val immutable = when (table) {

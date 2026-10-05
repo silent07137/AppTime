@@ -3,8 +3,30 @@ package io.github.silent07137.apptime.core
 
 import org.junit.Assert.*
 import org.junit.Test
+import java.time.LocalDate
+import java.time.ZoneId
 
 class HistoryTest {
+    @Test fun shiftedSystemDayAndPartialEveningBucketCannotRepresentCalendarDay() {
+        val zone = ZoneId.of("Asia/Shanghai")
+        val date = LocalDate.of(2026, 10, 5)
+        val midnight = date.atStartOfDay(zone).toInstant().toEpochMilli()
+        val shifted = midnight + (17 * 60 + 35) * 60_000L
+        assertFalse(HistoricalPolicy.isCalendarDay(shifted, shifted + 86_400_000L - 1, date, zone))
+        assertFalse(HistoricalPolicy.isCalendarDay(shifted, midnight + 23 * 3_600_000L, date, zone))
+        assertTrue(HistoricalPolicy.isCalendarDay(midnight, midnight + 23 * 3_600_000L, date, zone))
+    }
+    @Test fun calendarValidationUsesSourceTimezoneAndActualDstMidnights() {
+        val zone = ZoneId.of("America/New_York")
+        for (date in listOf(LocalDate.of(2026, 3, 8), LocalDate.of(2026, 11, 1))) {
+            val start = date.atStartOfDay(zone).toInstant().toEpochMilli()
+            val end = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+            assertTrue(HistoricalPolicy.isCalendarDay(start, end, date, zone))
+            assertTrue(HistoricalPolicy.isCalendarDay(start, end - 1, date, zone))
+            assertFalse(HistoricalPolicy.isCalendarDay(start, end + 1, date, zone))
+            assertFalse(HistoricalPolicy.isCalendarDay(start, end, date, ZoneId.of("UTC")))
+        }
+    }
     @Test fun recordingTransitionBucketIsKeptWholeWithoutProrating() {
         val old = HistoricalBucket("A", 0, 100, 80)
         val crossing = HistoricalBucket("A", 100, 200, 90)

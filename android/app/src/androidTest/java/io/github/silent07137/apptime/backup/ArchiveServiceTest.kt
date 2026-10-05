@@ -127,6 +127,24 @@ class ArchiveServiceTest {
         assertEquals(3_600_000L, target.db.usageDao().appDay(source.app, "1970-01-02")!!.durationMs)
         assertNull(target.db.usageDao().appDay(source.app, "1970-01-01"))
     }
+    @Test fun oldShiftedBackupRebuildsDailyTotalsAndStillMergesIdempotently() = runBlocking {
+        val source = archive(records = false); val target = archive(records = false)
+        source.db.openHelper.writableDatabase.execSQL("UPDATE devices SET reportTimezone = 'Asia/Shanghai'")
+        val midnight = java.time.LocalDate.of(2026, 10, 5).atStartOfDay(java.time.ZoneId.of("Asia/Shanghai")).toInstant().toEpochMilli()
+        val shifted = midnight + (17 * 60 + 35) * 60_000L
+        source.db.usageDao().saveSession(SessionEntity(UUID.randomUUID().toString(), source.device, source.app,
+            midnight + 3_600_000, midnight + 3_600_000, midnight + 3_600_000 + 187 * 60_000L, 187 * 60_000L,
+            "Asia/Shanghai", 28800, provisional = false, transitionEstimated = false))
+        source.db.usageDao().saveSystemDays(listOf(SystemDailyEntity(source.app, "2026-10-05", "Asia/Shanghai",
+            65 * 60_000L, shifted, shifted + 65 * 60_000L, shifted + 70 * 60_000L)))
+        val old = bytes(source)
+        assertTrue(merge(target, old) > 0)
+        assertEquals(187 * 60_000L, target.db.usageDao().appDay(source.app, "2026-10-05")!!.durationMs)
+        assertEquals("events", target.db.usageDao().appDay(source.app, "2026-10-05")!!.source)
+        assertFalse(target.db.usageDao().systemDay(source.app, "2026-10-05")!!.calendarAligned)
+        assertEquals(65 * 60_000L, target.db.usageDao().systemDay(source.app, "2026-10-05")!!.durationMs)
+        assertEquals(0, merge(target, old))
+    }
     @Test fun higherRevisionUpdatesAndTombstonesCannotBeResurrectedByOldBackup() = runBlocking {
         val source = archive(); val target = archive(records = false); val old = bytes(source)
         merge(target, old)

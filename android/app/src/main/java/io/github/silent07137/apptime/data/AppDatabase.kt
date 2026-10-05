@@ -37,7 +37,8 @@ data class EventDailyEntity(val identityId: String, val reportDate: String, val 
 @Entity(tableName = "system_daily_usage", primaryKeys = ["identityId", "reportDate"],
     foreignKeys = [ForeignKey(entity = IdentityEntity::class, parentColumns = ["identityId"], childColumns = ["identityId"], onDelete = ForeignKey.RESTRICT)], indices = [Index("reportDate")])
 data class SystemDailyEntity(val identityId: String, val reportDate: String, val timezone: String, val durationMs: Long,
-    val bucketStartMs: Long, val bucketEndMs: Long, val observedAtMs: Long)
+    val bucketStartMs: Long, val bucketEndMs: Long, val observedAtMs: Long,
+    @ColumnInfo(defaultValue = "0") val calendarAligned: Boolean = false)
 
 @Entity(tableName = "system_daily_supplements", primaryKeys = ["identityId", "reportDate"],
     foreignKeys = [ForeignKey(entity = IdentityEntity::class, parentColumns = ["identityId"], childColumns = ["identityId"], onDelete = ForeignKey.RESTRICT)])
@@ -84,6 +85,17 @@ data class LocalArchiveState(@PrimaryKey val id: Int = 1, val localDeviceId: Str
 data class AppObservationEntity(@PrimaryKey val identityId: String, val status: String, val signingDigest: String?, val signingChanged: Boolean, val observedAtMs: Long)
 
 const val DAILY_VIEW = """SELECT identityId, reportDate, SUM(durationMs) AS durationMs,
+    CASE WHEN COUNT(DISTINCT source) > 1 THEN 'mixed' ELSE MIN(source) END AS source FROM (
+        SELECT s.identityId, s.reportDate, s.durationMs + COALESCE(p.durationMs, 0) AS durationMs,
+            CASE WHEN COALESCE(p.durationMs, 0) > 0 THEN 'mixed' ELSE 'system' END AS source FROM system_daily_usage s
+        LEFT JOIN system_daily_supplements p ON p.identityId = s.identityId AND p.reportDate = s.reportDate
+        WHERE s.calendarAligned = 1
+        UNION ALL SELECT e.identityId, e.reportDate, e.durationMs, 'events' AS source FROM event_daily_usage e
+        WHERE NOT EXISTS (SELECT 1 FROM system_daily_usage s WHERE s.identityId = e.identityId AND s.reportDate = e.reportDate AND s.calendarAligned = 1)
+        UNION ALL SELECT identityId, reportDate, deltaMs AS durationMs, 'manual' AS source FROM manual_adjustments WHERE deleted = 0
+    ) GROUP BY identityId, reportDate"""
+
+private const val LEGACY_DAILY_VIEW = """SELECT identityId, reportDate, SUM(durationMs) AS durationMs,
     CASE WHEN COUNT(DISTINCT source) > 1 THEN 'mixed' ELSE MIN(source) END AS source FROM (
         SELECT s.identityId, s.reportDate, s.durationMs + COALESCE(p.durationMs, 0) AS durationMs,
             CASE WHEN COALESCE(p.durationMs, 0) > 0 THEN 'mixed' ELSE 'system' END AS source FROM system_daily_usage s
@@ -165,6 +177,9 @@ interface UsageDao {
     @Upsert suspend fun saveDailySyncState(state: DailySyncState)
     @Query("SELECT * FROM system_daily_usage WHERE identityId = :id AND reportDate = :date") suspend fun systemDay(id: String, date: String): SystemDailyEntity?
     @Upsert suspend fun saveSystemDays(days: List<SystemDailyEntity>)
+    @Query("SELECT * FROM system_daily_usage") suspend fun allSystemDays(): List<SystemDailyEntity>
+    @Query("UPDATE system_daily_usage SET calendarAligned = :aligned WHERE identityId = :id AND reportDate = :date")
+    suspend fun setCalendarAligned(id: String, date: String, aligned: Boolean)
     @Query("SELECT * FROM system_daily_usage WHERE identityId = :id AND reportDate >= :fromDate AND reportDate <= :toDate")
     suspend fun systemDays(id: String, fromDate: String, toDate: String): List<SystemDailyEntity>
     @Upsert suspend fun saveSystemSupplement(day: SystemDaySupplementEntity)
@@ -198,10 +213,18 @@ interface UsageDao {
 }
 
 @Database(entities = [DeviceEntity::class, IdentityEntity::class, SessionEntity::class, DailyEntity::class, EventDailyEntity::class, SystemDailyEntity::class, DailySyncState::class, CollectionState::class, CoverageEntity::class, HistoricalBucketEntity::class, HistoryImportState::class,
-    AppPreferenceEntity::class, IgnorePeriodEntity::class, AdjustmentEntity::class, AppObservationEntity::class, SystemDaySupplementEntity::class, LocalArchiveState::class], views = [AppDayTotal::class], version = 5, exportSchema = true)
+    AppPreferenceEntity::class, IgnorePeriodEntity::class, AdjustmentEntity::class, AppObservationEntity::class, SystemDaySupplementEntity::class, LocalArchiveState::class], views = [AppDayTotal::class], version = 6, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun usageDao(): UsageDao
     companion object {
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE system_daily_usage ADD COLUMN calendarAligned INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("UPDATE daily_sync_state SET eventRebuilt = 0")
+                db.execSQL("DROP VIEW app_day_totals")
+                db.execSQL("CREATE VIEW `app_day_totals` AS $DAILY_VIEW")
+            }
+        }
         val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE app_preferences ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
@@ -212,7 +235,7 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("INSERT INTO local_archive_state SELECT 1, deviceId FROM devices ORDER BY createdAt, deviceId LIMIT 1")
                 db.execSQL("UPDATE coverage SET coverageId = deviceId || ':' || coverageId")
                 db.execSQL("DROP VIEW app_day_totals")
-                db.execSQL("CREATE VIEW `app_day_totals` AS $DAILY_VIEW")
+                db.execSQL("CREATE VIEW `app_day_totals` AS $LEGACY_DAILY_VIEW")
             }
         }
         val MIGRATION_3_4 = object : Migration(3, 4) {
@@ -230,7 +253,7 @@ abstract class AppDatabase : RoomDatabase() {
                     FOREIGN KEY(identityId) REFERENCES app_identities(identityId) ON UPDATE NO ACTION ON DELETE RESTRICT)""")
                 db.execSQL("""CREATE TABLE IF NOT EXISTS system_daily_supplements (identityId TEXT NOT NULL, reportDate TEXT NOT NULL, durationMs INTEGER NOT NULL,
                     PRIMARY KEY(identityId, reportDate), FOREIGN KEY(identityId) REFERENCES app_identities(identityId) ON UPDATE NO ACTION ON DELETE RESTRICT)""")
-                db.execSQL("CREATE VIEW `app_day_totals` AS ${DAILY_VIEW.replace("FROM manual_adjustments WHERE deleted = 0", "FROM manual_adjustments")}")
+                db.execSQL("CREATE VIEW `app_day_totals` AS ${LEGACY_DAILY_VIEW.replace("FROM manual_adjustments WHERE deleted = 0", "FROM manual_adjustments")}")
             }
         }
         val MIGRATION_1_2 = object : Migration(1, 2) {

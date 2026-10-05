@@ -6,6 +6,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.silent07137.apptime.core.*
 import java.time.ZoneId
+import java.time.LocalDate
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import org.junit.*
@@ -201,6 +202,41 @@ class UsageRepositoryTest {
         assertFalse(reopened.collect())
         assertEquals(first.recordedMs, db.usageDao().observeApps().first().single().recordedMs)
         assertEquals(firstDays, db.usageDao().observeAppDays(first.identityId).first())
+    }
+    @Test fun shiftedSystemBucketsDoNotOverrideMidnightSessionsAndRemainRaw() = runBlocking {
+        val zone = ZoneId.of("Asia/Shanghai")
+        val date = LocalDate.of(2026, 10, 5)
+        val start = date.atStartOfDay(zone).toInstant().toEpochMilli()
+        val minute = 60_000L
+        val shifted = start + (17 * 60 + 35) * minute
+        db.openHelper.writableDatabase.execSQL("UPDATE devices SET reportTimezone = 'Asia/Shanghai'")
+        db.usageDao().saveState(CollectionState(recordFromMs = start, enabled = true))
+        clock = start + 23 * 3_600_000L
+        source.result = EventRead.Available(listOf(e(start + 60 * minute, EventKind.RESUME),
+            e(start + (60 + 122) * minute, EventKind.PAUSE),
+            e(shifted, EventKind.RESUME), e(shifted + 65 * minute, EventKind.PAUSE)))
+        val history = object : UsageHistorySource {
+            override fun read(startMs: Long, endMs: Long) = HistoryRead.Available(emptyList())
+            override fun readDaily(startMs: Long, endMs: Long) = HistoryRead.Available(listOf(
+                HistoricalBucket("A", shifted, clock, 65 * minute),
+                HistoricalBucket("B", shifted - 86_400_000L, shifted - 1, 200 * minute)))
+        }
+        val withHistory = UsageRepository(db, source, { it }, "personal", { clock }, { zone }, history)
+        repeat(3) { assertTrue(withHistory.collect()) }
+        val app = db.usageDao().observeApps().first().first { it.packageName == "A" }
+        val day = db.usageDao().appDay(app.identityId, date.toString())!!
+        assertEquals(187 * minute, day.durationMs)
+        assertEquals("events", day.source)
+        val rows = db.usageDao().observeDaySessions(start, start + 86_400_000L, app.identityId).first()
+        assertEquals(day.durationMs, UsageDistribution.hours(date, zone, rows.map { AppInterval(it.identityId, Interval(it.startMs, it.endMs)) }).sumOf { it.durationMs })
+        val raw = db.usageDao().systemDay(app.identityId, date.toString())!!
+        assertEquals(65 * minute, raw.durationMs)
+        assertFalse(raw.calendarAligned)
+        val other = db.usageDao().observeApps().first().first { it.packageName == "B" }
+        assertTrue(db.usageDao().observeAppDays(other.identityId).first().isEmpty())
+        assertEquals(2, db.usageDao().allSystemDays().size)
+        withHistory.rebuildArchiveCaches()
+        assertEquals(day, db.usageDao().appDay(app.identityId, date.toString()))
     }
     @Test fun emptyHistoricalQueryPreservesExistingBuckets() = runBlocking {
         var result: HistoryRead = HistoryRead.Available(listOf(HistoricalBucket("A", 0, 20_000, 5_000)))

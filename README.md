@@ -2,7 +2,7 @@
 
 离线记录 Android 应用的累计使用时长。支持 Android 10 及以上，采用 GPLv2 许可。
 
-[下载 v1.3.0 安装包](https://github.com/silent07137/AppTime/releases/tag/v1.3.0)
+[下载最新安装包](https://github.com/silent07137/AppTime/releases/latest)
 
 安装后打开 AppTime，授予“使用情况访问”。应用会尝试导入系统仍保留的最早历史，并继续记录使用时长；可查看累计、逐日用时和有记录的小时分布；支持日期筛选、应用分类、隐藏、忽略与手动修正。
 

@@ -48,4 +48,8 @@ v1.1.0 结果见 [验证记录](VALIDATION-2026-10-01.md)。Windows、长期可�
 dotnet run --project specs/tools/BackupFixture/BackupFixture.csproj -- test-fixtures/backup-v1
 ```
 
+## v1.3.1 补充
+
+新增错位系统桶（17:35 至次日 17:35 / 当晚未结束）、来源时区与 23/25 小时日校验；设备测试验证每日汇总与小时图取同一午夜范围、原始系统桶保留、旧备份恢复/重复合并及 v5→v6 撤权后的离线重建。v1/v2 升级链延伸至 v6；v4→v5 仍单独验证历史 schema。
+
 实机另检查 SAF 保存与回读、口令输入/取消/错误、恢复预览与替换确认、诊断导出、浅深色与大字体。CI 检查 .NET 样例、核心测试、debug/release lint 与压缩构建，再使用原有证书签名。真实手机差异仍须获取该手机诊断后核对，不能凭另一台测试机声称已确认原因。
