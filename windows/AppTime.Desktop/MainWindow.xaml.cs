@@ -337,6 +337,7 @@ public partial class MainWindow : Window
     {
         try
         {
+            store.SetSetting("idle_minutes","0"); tracker.Configure();
             await Task.Delay(1000); await Reload(true);
             if (report==null) throw new Exception("Report unavailable");
             // Dedicated test archive only. Synthetic rows never enter a normal user archive.
@@ -362,11 +363,14 @@ public partial class MainWindow : Window
             await Task.Delay(1600); tracker.Flush();
             var data=store.Snapshot();
             if (data["sessions"].Count==0) throw new Exception("No persisted foreground interval");
+            var realIds=data["app_identities"].Where(r=>Store.S(r,"packageName")==self.Key).Select(r=>Store.S(r,"identityId")).ToHashSet();
+            long liveMs=data["sessions"].Where(r=>realIds.Contains(Store.S(r,"identityId"))).Sum(r=>Store.N(r,"durationMs"));
+            if (foregroundVerified && liveMs<=0) throw new Exception("Native foreground polling did not persist the test application");
             Width=900; Height=600; page=0; Draw(false); UpdateLayout(); Render(Path.Combine(directory,"compact.png"));
             store.SetSetting("theme","light"); ApplyTheme(); Draw(false); UpdateLayout(); Render(Path.Combine(directory,"light.png"));
             store.SetSetting("theme","dark"); ApplyTheme(); page=4; Draw(false); UpdateLayout(); var scroller=(ScrollViewer)Body.Parent; scroller.ScrollToEnd(); UpdateLayout(); Render(Path.Combine(directory,"about.png"));
             Hide(); var process=Process.GetCurrentProcess(); var cpu=process.TotalProcessorTime; var clock=Stopwatch.StartNew(); await Task.Delay(15000); process.Refresh();
-            File.WriteAllText(Path.Combine(directory,"smoke.json"),JsonSerializer.Serialize(new { pages=6,nativeWindowIdentity=true,foregroundSamplingVerified=foregroundVerified,sessions=data["sessions"].Count,workingSetBytes=process.WorkingSet64,cpuPercent=(process.TotalProcessorTime-cpu).TotalMilliseconds/clock.Elapsed.TotalMilliseconds*100,window=new { width=ActualWidth,height=ActualHeight } }));
+            File.WriteAllText(Path.Combine(directory,"smoke.json"),JsonSerializer.Serialize(new { pages=6,nativeWindowIdentity=true,foregroundSamplingVerified=foregroundVerified && liveMs>0,liveForegroundMilliseconds=liveMs,sessions=data["sessions"].Count,workingSetBytes=process.WorkingSet64,cpuPercent=(process.TotalProcessorTime-cpu).TotalMilliseconds/clock.Elapsed.TotalMilliseconds*100,window=new { width=ActualWidth,height=ActualHeight } }));
             exiting=true; refresh.Stop(); tray.Dispose(); Close(); Application.Current.Shutdown();
         }
         catch (Exception e) { File.WriteAllText(Path.Combine(directory,"smoke-error.txt"),e.ToString()); Application.Current.Shutdown(1); }
