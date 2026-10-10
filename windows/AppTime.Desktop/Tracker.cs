@@ -36,6 +36,16 @@ public sealed class Tracker : IDisposable
             collector.Break(); Flush();
             collector.Timezone=store.LocalTimezone;
             collector.IdleThresholdMs=long.TryParse(store.Setting("idle_minutes"),out var minutes) ? minutes*60000 : 300000;
+            collector.IgnoredKeys=store.IgnoredKeys();
+        }
+    }
+    public void SetIgnored(string id,bool ignored)
+    {
+        lock (gate)
+        {
+            SampleBoundary(); collector.Break(); Flush();
+            store.SetIgnored(id,ignored,DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            collector.IgnoredKeys=store.IgnoredKeys(); Tick();
         }
     }
     public void TogglePause()
@@ -75,7 +85,7 @@ public sealed class Tracker : IDisposable
         lock (gate)
         {
             if (e.Reason is SessionSwitchReason.SessionLock or SessionSwitchReason.RemoteDisconnect or SessionSwitchReason.ConsoleDisconnect)
-            { SampleBoundary(); collector.Break(); Flush(); locked=true; }
+            { SampleBoundary(); collector.Break(); locked=true; SaveSignalBoundary(); }
             else if (e.Reason is SessionSwitchReason.SessionUnlock or SessionSwitchReason.RemoteConnect or SessionSwitchReason.ConsoleConnect) { locked=false; collector.Break(); }
         }
     }
@@ -83,9 +93,15 @@ public sealed class Tracker : IDisposable
     {
         lock (gate)
         {
-            if (e.Mode==PowerModes.Suspend) { SampleBoundary(); collector.Break(); Flush(); sleeping=true; }
+            if (e.Mode==PowerModes.Suspend) { SampleBoundary(); collector.Break(); sleeping=true; SaveSignalBoundary(); }
             else if (e.Mode==PowerModes.Resume) { sleeping=false; collector.Break(); }
         }
+    }
+    private void SaveSignalBoundary()
+    {
+        try { Flush(); }
+        catch (Exception e) when (e is Microsoft.Data.Sqlite.SqliteException or System.IO.IOException)
+        { Error="无法保存记录，请检查数据目录和磁盘空间"; Status=Error; }
     }
     public void Dispose()
     {

@@ -112,7 +112,7 @@ data class AppSummary(val identityId: String, val deviceId: String, val packageN
     val adjustmentMs: Long, val category: String, val hidden: Boolean, val ignored: Boolean, val installationStatus: String, val signingChanged: Boolean)
 
 data class DayAppUsage(val identityId: String, val packageName: String, val displayName: String, val category: String, val durationMs: Long, val source: String)
-data class DaySession(val identityId: String, val packageName: String, val displayName: String, val startMs: Long, val endMs: Long, val provisional: Boolean, val transitionEstimated: Boolean)
+data class DaySession(val identityId: String, val packageName: String, val displayName: String, val startMs: Long, val endMs: Long, val provisional: Boolean, val transitionEstimated: Boolean, val metric: String = "android_foreground")
 data class DaySummary(val reportDate: String, val durationMs: Long, val source: String)
 
 @Dao
@@ -132,14 +132,16 @@ interface UsageDao {
     @Query("SELECT identityId, reportDate, MAX(0, durationMs) AS durationMs, source FROM app_day_totals WHERE identityId = :id AND reportDate = :date") suspend fun appDay(id: String, date: String): AppDayTotal?
     @Query("""SELECT v.identityId, i.packageName, i.displayName, COALESCE(p.category, '未分类') AS category, MAX(0, v.durationMs) AS durationMs, v.source
         FROM app_day_totals v JOIN app_identities i ON i.identityId = v.identityId LEFT JOIN app_preferences p ON p.identityId = v.identityId
-        WHERE reportDate = :date AND (:id IS NULL OR v.identityId = :id) AND (:category IS NULL OR COALESCE(p.category, '未分类') = :category)
+        WHERE reportDate = :date AND (:id IS NULL OR v.identityId = :id) AND (:category IS NULL OR COALESCE(p.category, '未分类') = :category) AND (:deviceId IS NULL OR i.deviceId = :deviceId)
         ORDER BY v.durationMs DESC, i.packageName""")
-    fun observeDayApps(date: String, id: String? = null, category: String? = null): Flow<List<DayAppUsage>>
-    @Query("""SELECT s.identityId, i.packageName, i.displayName, s.startMs, s.endMs, s.provisional, s.transitionEstimated
+    fun observeDayApps(date: String, id: String? = null, category: String? = null, deviceId: String? = null): Flow<List<DayAppUsage>>
+    @Query("""SELECT s.identityId, i.packageName, i.displayName, s.startMs, s.endMs, s.provisional, s.transitionEstimated, s.metric
         FROM sessions s JOIN app_identities i ON i.identityId = s.identityId LEFT JOIN app_preferences p ON p.identityId = s.identityId
         WHERE s.deleted = 0 AND s.startMs < :end AND s.endMs > :start AND (:id IS NULL OR s.identityId = :id)
-        AND (:category IS NULL OR COALESCE(p.category, '未分类') = :category) ORDER BY s.startMs""")
-    fun observeDaySessions(start: Long, end: Long, id: String? = null, category: String? = null): Flow<List<DaySession>>
+        AND (:category IS NULL OR COALESCE(p.category, '未分类') = :category) AND (:deviceId IS NULL OR i.deviceId = :deviceId) ORDER BY s.startMs""")
+    fun observeDaySessions(start: Long, end: Long, id: String? = null, category: String? = null, deviceId: String? = null): Flow<List<DaySession>>
+    @Query("SELECT g.* FROM ignore_periods g JOIN app_identities i ON i.identityId=g.identityId WHERE (:deviceId IS NULL OR i.deviceId=:deviceId)")
+    fun observeIgnorePeriods(deviceId: String? = null): Flow<List<IgnorePeriodEntity>>
     @Query("SELECT * FROM devices WHERE deviceId = COALESCE((SELECT localDeviceId FROM local_archive_state WHERE id = 1), (SELECT deviceId FROM devices ORDER BY createdAt, deviceId LIMIT 1))") suspend fun device(): DeviceEntity?
     @Upsert suspend fun saveLocalState(state: LocalArchiveState)
     @Query("SELECT * FROM devices ORDER BY createdAt, deviceId") fun observeDevices(): Flow<List<DeviceEntity>>
@@ -204,10 +206,10 @@ interface UsageDao {
     fun observeApps(): Flow<List<AppSummary>>
     @Query("""SELECT reportDate, SUM(MAX(0, durationMs)) AS durationMs,
         CASE WHEN COUNT(DISTINCT source) > 1 THEN 'mixed' ELSE MIN(source) END AS source
-        FROM app_day_totals v LEFT JOIN app_preferences p ON p.identityId = v.identityId
+        FROM app_day_totals v JOIN app_identities i ON i.identityId=v.identityId LEFT JOIN app_preferences p ON p.identityId = v.identityId
         WHERE reportDate >= :fromDate AND reportDate <= :toDate AND (:id IS NULL OR v.identityId = :id)
-        AND (:category IS NULL OR COALESCE(p.category, '未分类') = :category) GROUP BY reportDate ORDER BY reportDate DESC""")
-    fun observeDays(fromDate: String, toDate: String = "9999-12-31", id: String? = null, category: String? = null): Flow<List<DaySummary>>
+        AND (:category IS NULL OR COALESCE(p.category, '未分类') = :category) AND (:deviceId IS NULL OR i.deviceId=:deviceId) GROUP BY reportDate ORDER BY reportDate DESC""")
+    fun observeDays(fromDate: String, toDate: String = "9999-12-31", id: String? = null, category: String? = null, deviceId: String? = null): Flow<List<DaySummary>>
     @Query("SELECT reportDate, MAX(0, durationMs) AS durationMs, source FROM app_day_totals WHERE identityId = :id ORDER BY reportDate DESC")
     fun observeAppDays(id: String): Flow<List<DaySummary>>
 }

@@ -3,7 +3,7 @@ using static AppTime.Core.Store;
 namespace AppTime.Core;
 
 public record Span(long Start, long End);
-public record AppUsage(string Id, string Name, string Key, long Total, Dictionary<DateOnly,long> Days, List<Span> Spans, bool Hidden);
+public record AppUsage(string Id, string Name, string Key, long Total, Dictionary<DateOnly,long> Days, List<Span> Spans, bool Hidden, string Category, bool Ignored);
 public record Report(Device Device, List<AppUsage> Apps)
 {
     public long Total => Apps.Sum(a=>a.Total);
@@ -48,12 +48,13 @@ public static class Statistics
             foreach (var h in buckets)
                 if (!accepted.Any(a=>N(a,"startMs")<N(h,"endMs") && N(a,"endMs")>N(h,"startMs")) && !ignores[id].Any(g=>N(g,"startMs")<N(h,"endMs"))) accepted.Add(h);
             long total=Subtract(spans,accepted.Select(h=>(N(h,"startMs"),N(h,"endMs")))).Sum(s=>s.End-s.Start)+accepted.Sum(h=>N(h,"usageMs"));
-            foreach (var row in adjustments[id])
+            foreach (var group in adjustments[id].GroupBy(r=>DateOnly.ParseExact(S(r,"reportDate"),"yyyy-MM-dd")))
             {
-                var date=DateOnly.ParseExact(S(row,"reportDate"),"yyyy-MM-dd");
-                days[date]=Math.Max(0,days.GetValueOrDefault(date)+N(row,"deltaMs")); total+=N(row,"deltaMs");
+                long delta=group.Sum(r=>N(r,"deltaMs"));
+                days[group.Key]=Math.Max(0,days.GetValueOrDefault(group.Key)+delta); total+=delta;
             }
-            apps.Add(new(id,S(i,"displayName"),S(i,"packageName"),Math.Max(0,total),days,spans.Select(s=>new Span(s.Start,s.End)).ToList(),preferences.TryGetValue(id,out var pref) && N(pref,"hidden")==1));
+            preferences.TryGetValue(id,out var pref);
+            apps.Add(new(id,S(i,"displayName"),S(i,"packageName"),Math.Max(0,total),days,spans.Select(s=>new Span(s.Start,s.End)).ToList(),pref!=null && N(pref,"hidden")==1,pref==null ? "未分类" : S(pref,"category"),pref!=null && N(pref,"ignored")==1));
         }
         return new(device,apps.OrderByDescending(a=>a.Total).ThenBy(a=>a.Name).ToList());
     }

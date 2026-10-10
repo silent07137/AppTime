@@ -36,8 +36,9 @@ public partial class MainWindow : Window
     private DateOnly selectedDay;
     private readonly List<Button> nav=[];
     private string search="";
+    private string category="全部分类",appFilter="可见应用";
     private sealed record DeviceChoice(Device Device,string Label) { public override string ToString()=>Label; }
-    private sealed record AppRow(string Id,string Name,string Time);
+    private sealed record AppRow(string Id,string Name,string Category,string State,string Time);
 
     public MainWindow(Store store,Tracker tracker)
     {
@@ -68,7 +69,7 @@ public partial class MainWindow : Window
         refresh.Tick+=async (_,_)=>
         {
             UpdateStatus();
-            if (IsVisible && !busy && !loading && store.Version!=loadedVersion && page is 0 or 2 or 5) { await Reload(); Draw(false); }
+            if (IsVisible && !busy && !loading && Keyboard.FocusedElement is not TextBox && Keyboard.FocusedElement is not ComboBox && store.Version!=loadedVersion && page is 0 or 2 or 5) { await Reload(); Draw(false); }
         };
         refresh.Start(); Closing+=OnClosing;
         Loaded+=async (_,_)=> { await Reload(true); Draw(true); UpdateStatus(); };
@@ -80,7 +81,7 @@ public partial class MainWindow : Window
         PauseButton.Content=trayPause.Text=tracker.Paused ? "继续记录" : "暂停记录";
         tray.Text="AppTime · "+tracker.Status;
     }
-    private void TogglePause() { tracker.TogglePause(); UpdateStatus(); }
+    private void TogglePause() { try { tracker.TogglePause(); UpdateStatus(); } catch (Exception e) when (e is IOException or Microsoft.Data.Sqlite.SqliteException) { Message("无法保存暂停状态，请检查磁盘空间"); } }
     private void PauseClicked(object sender,RoutedEventArgs e)=>TogglePause();
     private void OnClosing(object? sender,CancelEventArgs e)
     {
@@ -168,10 +169,13 @@ public partial class MainWindow : Window
     }
     private UIElement AppList(List<AppUsage> apps,double height)
     {
-        var list=new ListView { Height=Math.Min(height,Math.Max(72,apps.Count*48+38)),Margin=new Thickness(0,16,0,18),Background=Brush("Surface"),Foreground=Brush("Foreground"),BorderThickness=new Thickness(0),Padding=new Thickness(10),ItemsSource=apps.Select(a=>new AppRow(a.Id,a.Name,Statistics.Duration(a.Total))).ToList() };
+        var list=new ListView { Height=Math.Min(height,Math.Max(72,apps.Count*48+38)),Margin=new Thickness(0,16,0,18),Background=Brush("Surface"),Foreground=Brush("Foreground"),BorderThickness=new Thickness(0),Padding=new Thickness(10),ItemsSource=apps.Select(a=>new AppRow(a.Id,a.Name,a.Category,a.Ignored ? "已忽略" : a.Hidden ? "已隐藏" : "",Statistics.Duration(a.Total))).ToList() };
         VirtualizingPanel.SetIsVirtualizing(list,true); VirtualizingPanel.SetVirtualizationMode(list,VirtualizationMode.Recycling);
         ScrollViewer.SetHorizontalScrollBarVisibility(list,ScrollBarVisibility.Disabled);
-        var view=new GridView(); view.Columns.Add(new GridViewColumn { Header="应用",DisplayMemberBinding=new System.Windows.Data.Binding("Name"),Width=Math.Max(240,ActualWidth-650) }); view.Columns.Add(new GridViewColumn { Header="累计",DisplayMemberBinding=new System.Windows.Data.Binding("Time"),Width=160 }); list.View=view;
+        var view=new GridView();
+        foreach (var column in new[]{("应用","Name",Math.Max(170,ActualWidth-870)),("分类","Category",95d),("状态","State",75d),("累计","Time",155d)})
+            view.Columns.Add(new GridViewColumn { Header=column.Item1,DisplayMemberBinding=new System.Windows.Data.Binding(column.Item2),Width=column.Item3 });
+        list.View=view;
         void Select() { if (list.SelectedItem is AppRow row) { selectedApp=row.Id; previousPage=page; page=6; Draw(true); } }
         list.KeyDown+=(_,e)=> { if (e.Key==Key.Enter) { Select(); e.Handled=true; } };
         list.MouseLeftButtonUp+=(_,e)=>
@@ -185,9 +189,18 @@ public partial class MainWindow : Window
     private void Apps()
     {
         PageTitle.Text="应用"; var query=new TextBox { Text=search,Margin=new Thickness(0,0,0,8),ToolTip="搜索应用" }; AutomationProperties.SetName(query,"搜索应用");
+        var categories=new ComboBox { ItemsSource=new[]{"全部分类"}.Concat(report!.Apps.Select(a=>a.Category).Distinct().Order()),MinWidth=130,Margin=new Thickness(0,0,12,10) };
+        categories.SelectedItem=category; if (categories.SelectedItem==null) categories.SelectedIndex=0;
+        var filters=new ComboBox { ItemsSource=new[]{"可见应用","全部档案","已隐藏","已忽略"},SelectedItem=appFilter,MinWidth=130,Margin=new Thickness(0,0,0,10) };
+        AutomationProperties.SetName(categories,"应用分类"); AutomationProperties.SetName(filters,"档案筛选");
         var holder=new ContentControl();
-        void Update() { search=query.Text; holder.Content=AppList(report!.Apps.Where(a=>!a.Hidden && a.Name.Contains(search,StringComparison.CurrentCultureIgnoreCase)).ToList(),Math.Max(260,ActualHeight-250)); }
-        query.TextChanged+=(_,_)=>Update(); Body.Children.Add(query); Body.Children.Add(holder); Update();
+        void Update()
+        {
+            search=query.Text; category=categories.SelectedItem as string ?? "全部分类"; appFilter=filters.SelectedItem as string ?? "可见应用";
+            holder.Content=AppList(report!.Apps.Where(a=>(appFilter switch { "可见应用"=>!a.Hidden,"已隐藏"=>a.Hidden,"已忽略"=>a.Ignored,_=>true }) && (category=="全部分类" || a.Category==category) && a.Name.Contains(search,StringComparison.CurrentCultureIgnoreCase)).ToList(),Math.Max(220,ActualHeight-320));
+        }
+        query.TextChanged+=(_,_)=>Update(); categories.SelectionChanged+=(_,_)=>Update(); filters.SelectionChanged+=(_,_)=>Update();
+        Body.Children.Add(query); Body.Children.Add(new StackPanel { Orientation=Orientation.Horizontal,Children={categories,filters} }); Body.Children.Add(holder); Update();
     }
     private void Trends()
     {
@@ -211,7 +224,16 @@ public partial class MainWindow : Window
     {
         var app=report!.Apps.SingleOrDefault(a=>a.Id==selectedApp);
         if (app==null) { page=1; Draw(false); return; }
-        PageTitle.Text=app.Name; Body.Children.Add(Metric("累计用时",app.Total,true)); Body.Children.Add(Card(Stack(Text("最近 7 天",17),DailyChart(7,app.Id)))); Dates(app.Id);
+        PageTitle.Text=app.Name; Body.Children.Add(Metric("累计用时",app.Total,true));
+        if (report.Device.Id==store.LocalDeviceId)
+        {
+            var hidden=new CheckBox { Content="隐藏应用",IsChecked=app.Hidden,Margin=new Thickness(0,8,0,12) };
+            hidden.Click+=(_,_)=> { bool value=hidden.IsChecked==true; Change(()=>store.UpdatePreference(app.Id,hidden:value),"显示设置已保存"); };
+            var ignored=new CheckBox { Content="忽略采集",IsChecked=app.Ignored,ToolTip="从现在起停止记录；已有历史保留",Margin=new Thickness(0,0,0,12) };
+            ignored.Click+=(_,_)=> { bool value=ignored.IsChecked==true; Change(()=>tracker.SetIgnored(app.Id,value),value ? "已停止记录此应用，历史保留" : "已恢复记录，忽略时段不会补计"); };
+            Body.Children.Add(new Expander { Header="应用管理 · "+app.Category,Margin=new Thickness(0,0,0,18),Content=Stack(Action("修改分类",()=>EditCategory(app)),hidden,ignored,Action("修正今日用时",()=>OpenDay(Today,app.Id))) });
+        }
+        Body.Children.Add(Card(Stack(Text("最近 7 天",17),DailyChart(7,app.Id)))); Dates(app.Id);
     }
     private void Day()
     {
@@ -224,6 +246,17 @@ public partial class MainWindow : Window
         if (selectedApp!=null) Body.Children.Add(Text(report!.Apps.Single(a=>a.Id==selectedApp).Name,16,"Muted"));
         long daily=report!.Day(selectedDay,selectedApp); bool exists=report.Dates(selectedApp).Contains(selectedDay);
         Body.Children.Add(exists ? Metric("当天用时",daily,true) : Card(Text("当天暂无记录",18,"Muted")));
+        if (selectedApp!=null && report.Device.Id==store.LocalDeviceId)
+        {
+            string id=selectedApp; DateOnly date=selectedDay;
+            var corrections=Stack(Action("修正用时",()=>EditAdjustment(id,date)));
+            foreach (var adjustment in store.Adjustments(id,date))
+            {
+                var item=adjustment;
+                corrections.Children.Add(Action((item.DeltaMs>0 ? "+" : "−")+Statistics.Duration(Math.Abs(item.DeltaMs))+(item.Note.Length==0 ? "" : " · "+item.Note)+"    撤销",()=>Change(()=>store.UndoAdjustment(item.Id),"修正已撤销")));
+            }
+            Body.Children.Add(new Expander { Header="手动修正",Content=corrections,Margin=new Thickness(0,0,0,18) });
+        }
         var hours=Statistics.Hours(report,selectedDay,selectedApp);
         var chart=new Chart { Margin=new Thickness(0,20,0,0),Bars=hours.Select(h=>new Bar(h.Label,h.Duration==0 && !exists ? null : h.Duration)).ToList() };
         Body.Children.Add(Card(Stack(Text("时间分布",17),chart)));
@@ -277,7 +310,36 @@ public partial class MainWindow : Window
             catch (Exception e) when (e is TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException) { Message("时区无效，例如 Asia/Shanghai"); }
         }))));
         Body.Children.Add(Card(Stack(Text("数据",18),Action("导出加密备份",ExportBackup),Action("导入备份",ImportBackup),Action("打开数据目录",()=>Launch(store.DirectoryPath)))));
-        Body.Children.Add(Card(Stack(Text("关于 AppTime",20),Text("Windows 0.1.0",13,"Muted"),Action("GitHub 仓库",()=>Launch("https://github.com/silent07137/AppTime")),Action("开源许可证 · GPLv2",()=>License("LICENSE.txt","GPL-2.0-only")),Action("第三方许可证",()=>License("THIRD_PARTY_NOTICES.txt","第三方许可")))));
+        Body.Children.Add(Card(Stack(Text("关于 AppTime",20),Text("Windows "+typeof(MainWindow).Assembly.GetName().Version?.ToString(3),13,"Muted"),Action("GitHub 仓库",()=>Launch("https://github.com/silent07137/AppTime")),Action("开源许可证 · GPLv2",()=>License("LICENSE.txt","GPL-2.0-only")),Action("第三方许可证",()=>License("THIRD_PARTY_NOTICES.txt","第三方许可")))));
+    }
+    private async void Change(Action action,string success)
+    {
+        if (busy) return; busy=true;
+        try { await Task.Run(action); await Reload(); Draw(false); Message(success); }
+        catch (InvalidDataException e) { await Reload(); Draw(false); Message(e.Message); }
+        catch (Exception e) when (e is IOException or Microsoft.Data.Sqlite.SqliteException) { await Reload(); Draw(false); Message("保存失败，请检查数据目录和磁盘空间"); }
+        finally { busy=false; }
+    }
+    private Window Editor(string title,StackPanel content)=>new() { Owner=this,Title=title,Width=380,SizeToContent=SizeToContent.Height,ResizeMode=ResizeMode.NoResize,WindowStartupLocation=WindowStartupLocation.CenterOwner,Background=Brush("Background"),Foreground=Brush("Foreground"),Content=new Border { Padding=new Thickness(24),Child=content } };
+    private void EditCategory(AppUsage app)
+    {
+        var input=new TextBox { Text=app.Category,MaxLength=24,Margin=new Thickness(0,12,0,18) }; AutomationProperties.SetName(input,"分类名称");
+        var body=Stack(Text("分类名称",16),input); var window=Editor("修改分类",body);
+        body.Children.Add(Action("保存",()=> { if (string.IsNullOrWhiteSpace(input.Text)) return; window.DialogResult=true; }));
+        if (window.ShowDialog()==true) { string value=input.Text; Change(()=>store.UpdatePreference(app.Id,category:value),"分类已保存"); }
+    }
+    private void EditAdjustment(string id,DateOnly date)
+    {
+        var minutes=new TextBox { Margin=new Thickness(0,10,0,18) }; var note=new TextBox { MaxLength=120,Margin=new Thickness(0,10,0,18) };
+        AutomationProperties.SetName(minutes,"修正分钟，正数补记，负数扣减"); AutomationProperties.SetName(note,"修正备注");
+        var warning=Text("",13,"Muted"); warning.TextWrapping=TextWrapping.Wrap;
+        var body=Stack(Text(date.ToString("yyyy-MM-dd"),18),Text("分钟（正数补记，负数扣减）"),minutes,Text("备注（可选）"),note,warning); var window=Editor("修正用时",body); long delta=0;
+        body.Children.Add(Action("保存",()=>
+        {
+            if (!long.TryParse(minutes.Text,out long value) || value==0 || value is < -1440 or >1440) { warning.Text="请输入 −1440 至 1440 内的非零整数"; return; }
+            delta=value*60000; window.DialogResult=true;
+        }));
+        if (window.ShowDialog()==true) { string value=note.Text; Change(()=>store.AddAdjustment(id,date,delta,value,DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),"修正已保存，原始时段保留"); }
     }
     private bool StartupEnabled() { using var key=Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"); return key?.GetValue("AppTime") is string; }
     private void ApplyTheme()
@@ -325,6 +387,7 @@ public partial class MainWindow : Window
             string directory=Path.Combine(store.DirectoryPath,"Backups"); Directory.CreateDirectory(directory);
             string protection=Path.Combine(directory,"before-restore-"+DateTime.Now.ToString("yyyyMMdd-HHmmss")+"-"+Guid.NewGuid().ToString("N")[..8]+".atbackup");
             int added=await Task.Run(()=> { Backup.Export(store,protection,password); return store.Merge(plan.Data); });
+            tracker.Configure();
             await Reload(true); Draw(false); Message($"导入完成 · {added} 条新增或更新；保护备份已保存到 Backups");
         }
         catch (CryptographicException) { Message("口令不正确或备份已损坏，档案未修改"); }
@@ -355,6 +418,12 @@ public partial class MainWindow : Window
             }
             for (int i=0;i<5;i++) { page=i; Draw(false); UpdateLayout(); await Task.Delay(100); Render(Path.Combine(directory,$"page-{i}.png")); }
             selectedDay=Today; page=5; Draw(false); UpdateLayout(); Render(Path.Combine(directory,"day.png"));
+            selectedApp=report.Apps.First().Id; page=6; Draw(false);
+            foreach (var expander in Body.Children.OfType<Expander>()) expander.IsExpanded=true;
+            UpdateLayout(); Render(Path.Combine(directory,"app-management.png"));
+            page=5; Draw(false);
+            foreach (var expander in Body.Children.OfType<Expander>()) expander.IsExpanded=true;
+            UpdateLayout(); Render(Path.Combine(directory,"corrections.png")); selectedApp=null;
             Activate(); await Task.Delay(300);
             var native=new NativeSource().Read();
             var adapter=new NativeSource(); var self=adapter.ReadWindow(new System.Windows.Interop.WindowInteropHelper(this).Handle);
@@ -370,7 +439,7 @@ public partial class MainWindow : Window
             store.SetSetting("theme","light"); ApplyTheme(); Draw(false); UpdateLayout(); Render(Path.Combine(directory,"light.png"));
             store.SetSetting("theme","dark"); ApplyTheme(); page=4; Draw(false); UpdateLayout(); var scroller=(ScrollViewer)Body.Parent; scroller.ScrollToEnd(); UpdateLayout(); Render(Path.Combine(directory,"about.png"));
             Hide(); var process=Process.GetCurrentProcess(); var cpu=process.TotalProcessorTime; var clock=Stopwatch.StartNew(); await Task.Delay(15000); process.Refresh();
-            File.WriteAllText(Path.Combine(directory,"smoke.json"),JsonSerializer.Serialize(new { pages=6,nativeWindowIdentity=true,foregroundSamplingVerified=foregroundVerified && liveMs>0,liveForegroundMilliseconds=liveMs,sessions=data["sessions"].Count,workingSetBytes=process.WorkingSet64,cpuPercent=(process.TotalProcessorTime-cpu).TotalMilliseconds/clock.Elapsed.TotalMilliseconds*100,window=new { width=ActualWidth,height=ActualHeight } }));
+            File.WriteAllText(Path.Combine(directory,"smoke.json"),JsonSerializer.Serialize(new { pages=8,nativeWindowIdentity=true,foregroundSamplingVerified=foregroundVerified && liveMs>0,liveForegroundMilliseconds=liveMs,sessions=data["sessions"].Count,workingSetBytes=process.WorkingSet64,cpuPercent=(process.TotalProcessorTime-cpu).TotalMilliseconds/clock.Elapsed.TotalMilliseconds*100,window=new { width=ActualWidth,height=ActualHeight } }));
             exiting=true; refresh.Stop(); tray.Dispose(); Close(); Application.Current.Shutdown();
         }
         catch (Exception e) { File.WriteAllText(Path.Combine(directory,"smoke-error.txt"),e.ToString()); Application.Current.Shutdown(1); }

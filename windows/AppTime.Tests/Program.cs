@@ -55,6 +55,86 @@ try
     });
     Test("overlapping sessions are unioned",()=>Check(TimeZones.Union([(0L,100L),(50L,150L)]).Single()==(0L,150L)));
     Test("ignored range subtraction",()=>Check(Statistics.Subtract([(0L,100L)],[(30L,70L)]).Sum(s=>s.End-s.Start)==60));
+    Test("ignored collector does not record and resumes without filling the gap",()=>
+    {
+        var c=Engine(); c.Poll(new(epoch,0,0,a)); c.Poll(new(epoch+1000,1000,0,a)); c.Break();
+        c.IgnoredKeys=[a.Key]; c.Poll(new(epoch+1000,1000,0,a)); c.Poll(new(epoch+4000,4000,0,a)); c.Break();
+        Check(c.Status=="已忽略"); c.IgnoredKeys=[];
+        c.Poll(new(epoch+4000,4000,0,a)); c.Poll(new(epoch+5000,5000,0,a));
+        var rows=c.Drain(); Check(rows.Sessions.Sum(s=>s.EndMs-s.StartMs)==2000 && rows.Gaps.Count==0);
+    });
+    string managedPath=Path.Combine(root,"management.sqlite"); string managedId;
+    using (var managed=new Store(managedPath))
+    {
+        managed.ChangeTimezone("UTC"); managed.Save(([new(Guid.NewGuid().ToString(),a,0,60000,"UTC",0),new(Guid.NewGuid().ToString(),a,0,20000,"UTC",0)],[]));
+        managedId=Statistics.Read(managed,managed.LocalDeviceId).Apps.Single().Id;
+        Test("classify and hide retain usage with idempotent preference revisions",()=>
+        {
+            managed.UpdatePreference(managedId,"学习",true); long revision=managed.Preference(managedId).Revision;
+            managed.UpdatePreference(managedId,"学习",true); Check(managed.Preference(managedId).Revision==revision);
+            var report=Statistics.Read(managed,managed.LocalDeviceId); Check(report.Total==80000 && report.Apps.Single() is { Category:"学习",Hidden:true });
+        });
+        Test("ignore periods survive resume and preserve raw sessions",()=>
+        {
+            managed.SetIgnored(managedId,true,10000); Check(managed.IgnoredKeys().Contains(a.Key));
+            managed.SetIgnored(managedId,true,11000); managed.SetIgnored(managedId,false,15000);
+            Check(managed.Snapshot()["ignore_periods"].Count==1 && managed.Snapshot()["sessions"].Count==2);
+            Check(managed.IgnoredKeys().Count==0 && Statistics.Read(managed,managed.LocalDeviceId).Total==70000);
+        });
+        Test("manual corrections are separate from hourly distribution and reversible",()=>
+        {
+            var date=new DateOnly(1970,1,1); managed.AddAdjustment(managedId,date,60000,"补记",100000);
+            managed.AddAdjustment(managedId,date,-30000,"扣减",100001);
+            var report=Statistics.Read(managed,managed.LocalDeviceId); Check(report.Total==100000 && report.Day(date)==100000 && Statistics.Hours(report,date).Sum(h=>h.Duration)==70000);
+            var minus=managed.Adjustments(managedId,date).Single(a=>a.DeltaMs<0); managed.UndoAdjustment(minus.Id); managed.UndoAdjustment(minus.Id);
+            Check(Statistics.Read(managed,managed.LocalDeviceId).Total==130000 && managed.Snapshot()["manual_adjustments"].Count==2);
+            Check(managed.Snapshot()["manual_adjustments"].Any(r=>N(r,"deleted")==1 && N(r,"revision")==2));
+        });
+        Test("invalid correction rolls back without altering records",()=>
+        {
+            int before=managed.Snapshot()["manual_adjustments"].Count;
+            bool failed=false; try { managed.AddAdjustment(managedId,new(1970,1,2),-60000,"",100000); } catch (InvalidDataException) { failed=true; }
+            Check(failed && managed.Snapshot()["manual_adjustments"].Count==before);
+            failed=false; try { managed.AddAdjustment(managedId,new(3000,1,1),60000,"",100000); } catch (InvalidDataException) { failed=true; } Check(failed);
+        });
+        Test("correction undo cannot invalidate a dependent deduction",()=>
+        {
+            var date=new DateOnly(1970,1,2); managed.AddAdjustment(managedId,date,60000,"",86400000); managed.AddAdjustment(managedId,date,-60000,"",86400000);
+            var plus=managed.Adjustments(managedId,date).Single(a=>a.DeltaMs>0); bool failed=false;
+            try { managed.UndoAdjustment(plus.Id); } catch (InvalidDataException) { failed=true; } Check(failed);
+            managed.UndoAdjustment(managed.Adjustments(managedId,date).Single(a=>a.DeltaMs<0).Id); managed.UndoAdjustment(plus.Id);
+        });
+        Test("managed archive backup preserves revisions and raw history",()=>
+        {
+            string file=Path.Combine(root,"managed.atbackup"); Backup.Export(managed,file,password); var plan=Backup.Read(file,password);
+            using var target=new Store(Path.Combine(root,"managed-target.sqlite")); Check(target.Merge(plan.Data)>0 && target.Merge(plan.Data)==0);
+            Check(Statistics.Read(target,plan.Origin).Total==130000 && target.LocalDeviceId!=plan.Origin);
+            bool failed=false; try { target.SetIgnored(managedId,true,90000); } catch (InvalidDataException) { failed=true; } Check(failed);
+            if (args.Length>1) File.Copy(file,args[1],true); // Explicit public synthetic fixture output only.
+        });
+        Test("Windows timezone is normalized for Android portability",()=> { managed.ChangeTimezone("China Standard Time"); Check(managed.LocalTimezone=="Asia/Shanghai"); });
+    }
+    Test("management survives reopening without replacing sessions",()=>
+    {
+        using var managed=new Store(managedPath); Check(managed.Preference(managedId) is { Category:"学习",Hidden:true,Ignored:false });
+        Check(Statistics.Read(managed,managed.LocalDeviceId).Total==130000);
+    });
+    Test("public Windows fixture retains management and clock rollback duration",()=>
+    {
+        var plan=Backup.Read(Path.Combine(args.Length>0 ? args[0] : "../test-fixtures/backup-v1","windows-golden.atbackup"),password);
+        using var target=new Store(Path.Combine(root,"fixture-windows.sqlite")); target.Merge(plan.Data);
+        var report=Statistics.Read(target,plan.Origin); Check(report.Device.Platform=="windows" && report.Total==130000);
+        Check(report.Day(new(1970,1,1))==130000 && Statistics.Hours(report,new(1970,1,1)).Sum(h=>h.Duration)==70000);
+    });
+    if (args.Length>2) Test("real Android re-export of Windows archive preserves device and totals",()=>
+    {
+        var plan=Backup.Read(args[2],password); using var target=new Store(Path.Combine(root,"android-reexport.sqlite"));
+        Check(target.Merge(plan.Data)>0 && target.Merge(plan.Data)==0);
+        var windows=target.Devices().Single(d=>d.Platform=="windows" && d.Id!=target.LocalDeviceId);
+        var report=Statistics.Read(target,windows.Id); var date=new DateOnly(1970,1,1);
+        Check(report.Total==130000 && report.Day(date)==130000 && Statistics.Hours(report,date).Sum(h=>h.Duration)==70000);
+        Check(report.Apps.Single() is { Category:"学习",Hidden:true });
+    });
     string path=Path.Combine(root,"archive.sqlite"); string local;
     using (var store=new Store(path))
     {

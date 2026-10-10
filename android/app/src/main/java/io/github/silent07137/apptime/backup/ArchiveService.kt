@@ -18,6 +18,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 class RestorePlan internal constructor(val directory: File, val manifest: JSONObject) : Closeable {
+    val originPlatform: String = File(directory, "devices.jsonl").useLines { lines ->
+        lines.map(::JSONObject).first { it.getString("deviceId") == manifest.getString("exporting_device_id") }.getString("platform")
+    }
     val apps: Int get() = manifest.getJSONObject("files").getJSONObject("app_identities.jsonl").getInt("rows")
     val records: Int get() = manifest.getJSONObject("files").getJSONObject("sessions.jsonl").getInt("rows")
     val devices: Int get() = manifest.getJSONObject("files").getJSONObject("devices.jsonl").getInt("rows")
@@ -154,8 +157,10 @@ class ArchiveService(private val context: Context, private val repo: UsageReposi
             try {
                 stage.withTransaction {
                     for (table in TABLES) importTable(stage, dir, table, false)
-                    stage.openHelper.writableDatabase.query("""SELECT 1 FROM sessions s JOIN app_identities i ON i.identityId = s.identityId WHERE s.originDeviceId != i.deviceId
-                        UNION ALL SELECT 1 FROM historical_buckets h JOIN app_identities i ON i.identityId = h.identityId WHERE h.originDeviceId != i.deviceId LIMIT 1""").use {
+                    stage.openHelper.writableDatabase.query("""SELECT 1 FROM sessions s JOIN app_identities i ON i.identityId = s.identityId JOIN devices d ON d.deviceId = i.deviceId
+                        WHERE s.originDeviceId != i.deviceId OR (d.platform = 'windows' AND s.metric != 'windows_active_foreground') OR (d.platform = 'android' AND s.metric != 'android_foreground')
+                        UNION ALL SELECT 1 FROM historical_buckets h JOIN app_identities i ON i.identityId = h.identityId JOIN devices d ON d.deviceId = i.deviceId WHERE h.originDeviceId != i.deviceId OR d.platform != 'android'
+                        UNION ALL SELECT 1 FROM system_daily_usage s JOIN app_identities i ON i.identityId = s.identityId JOIN devices d ON d.deviceId = i.deviceId WHERE d.platform != 'android' LIMIT 1""").use {
                         require(!it.moveToFirst()) { "备份应用与来源设备不匹配" }
                     }
                     val origin = manifest.getString("exporting_device_id")
@@ -175,6 +180,7 @@ class ArchiveService(private val context: Context, private val repo: UsageReposi
 
     /** Existing data is protected before writes; all restore writes and cache rebuilds are atomic. */
     suspend fun restore(plan: RestorePlan, password: CharArray, replace: Boolean, samePhone: Boolean = false): Int = repo.withArchiveLock { db ->
+        require(!samePhone || plan.originPlatform == "android") { "Windows 档案不能作为本机 Android 采集身份" }
         val protection = workspace()
         try {
             val zip = snapshot(db, protection)
@@ -258,6 +264,8 @@ class ArchiveService(private val context: Context, private val repo: UsageReposi
                 var write = true
                 if (existing != null) {
                     val immutable = when (table) {
+                        "devices" -> listOf("platform", "createdAt")
+                        "app_identities" -> listOf("deviceId", "profileScope", "packageName")
                         "sessions" -> listOf("originDeviceId", "identityId", "anchorMs", "metric", "source")
                         "historical_buckets" -> listOf("originDeviceId", "identityId", "source", "startMs")
                         "ignore_periods" -> listOf("identityId", "startMs")
@@ -302,9 +310,11 @@ class ArchiveService(private val context: Context, private val repo: UsageReposi
         for (name in listOf("acceptedBuckets", "skippedBuckets")) if (e.has(name)) require(e.getLong(name) in 0..Int.MAX_VALUE.toLong())
         if (table == "collection_state") require(e.getString("source") == "android_usage_events")
         if (table == "history_import_state") require(e.getString("source") in setOf("android_usage_stats_daily", "android_usage_stats_best"))
-        if (table == "devices") require(e.getString("platform") == "android") { "此版暂不支持其他平台档案" }
+        if (table == "devices") require(e.getString("platform") in setOf("android", "windows")) { "不支持的设备平台" }
         if (table == "sessions") require(e.getLong("endMs") > e.getLong("startMs") && e.getLong("startMs") >= e.getLong("anchorMs") && e.getLong("durationMs") == e.getLong("endMs") - e.getLong("startMs") && e.getLong("durationMs") <= 7 * 86_400_000L)
-        if (table == "sessions") require(e.getString("metric") == "android_foreground" && e.getString("source") == "android_usage_events")
+        if (table == "sessions") require((e.getString("metric") == "android_foreground" && e.getString("source") == "android_usage_events") ||
+            (e.getString("metric") == "windows_active_foreground" && e.getString("source") == "windows_foreground_poll"))
+        if (table == "historical_buckets") require(e.getString("source") in setOf("android_usage_stats_daily", "android_usage_stats_best"))
         if (table == "historical_buckets" || table == "coverage") require(e.getLong("endMs") > e.getLong("startMs"))
         if (table == "system_daily_usage") require(e.getLong("bucketEndMs") > e.getLong("bucketStartMs"))
         if (table == "ignore_periods" && !e.isNull("endMs")) require(e.getLong("endMs") >= e.getLong("startMs"))

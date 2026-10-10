@@ -7,6 +7,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class DistributionTest {
+    @Test fun windowsRollbackEpisodesRemainDistinctAfterIgnoreAndCalendarSplitting() {
+        val raw = listOf(Interval(0, 60_000), Interval(0, 20_000))
+        val rows = UsageMath.subtract(raw, listOf(Interval(10_000, 15_000)), unionObservations = false)
+        val zone = ZoneId.of("UTC"); val date = LocalDate.of(1970, 1, 1)
+        assertEquals(70_000L, UsageMath.daily(rows, zone, unionObservations = false)[date])
+        assertEquals(70_000L, UsageDistribution.hours(date, zone, rows.map { AppInterval("A", it) }, unionObservations = false).sumOf { it.durationMs })
+        assertEquals(55_000L, UsageMath.daily(rows, zone)[date]) // Android still unions observations.
+    }
     @Test fun unionPerAppPreservesConcurrentAppsAndClipsMidnight() {
         val rows = listOf(AppInterval("A", Interval(-10_000, 3_700_000)),
             AppInterval("A", Interval(0, 1_800_000)), AppInterval("B", Interval(0, 60_000)))

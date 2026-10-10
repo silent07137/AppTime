@@ -154,7 +154,7 @@ internal val AppSummary.knownTotal: Long get() = (durationMs + historicalMs + ad
 @Composable internal fun DataNotes(state: CollectionState?, history: HistoryImportState?, gaps: Int, zone: ZoneId, multipleDevices: Boolean = false) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("已记录与旧历史可能重叠，不能直接相加；已知总计按历史范围去重。每日用时按报表时区的午夜划分，只采用符合日期边界的系统统计，否则使用当天事件记录。", style = MaterialTheme.typography.bodyMedium)
-        if (multipleDevices) Text("总计为各设备用时之和，同时使用多台设备会分别计时。每日汇总保留来源设备的报表日期；查看具体应用时采用其来源时区。", style = MaterialTheme.typography.bodySmall)
+        if (multipleDevices) Text("按来源设备查看用时与日期。Android 应用前台和 Windows 活跃前台分别展示；备份交换不会自动同步。", style = MaterialTheme.typography.bodySmall)
         Text("记录起点  ${timeText(state?.takeIf { it.enabled }?.recordFromMs, zone)}\n最后保存  ${timeText(state?.lastSuccessMs, zone)}\n采集状态  ${state?.status ?: "未采集"}", style = MaterialTheme.typography.bodySmall)
         if (gaps > 0) Text("$gaps 段查询范围不可用或完整性未知；记录已保留。", style = MaterialTheme.typography.bodySmall)
         if (history != null) Text("历史查询  ${if (history.requestedStartMs == 0L) "系统保留的最早记录" else timeText(history.requestedStartMs, zone)} → ${timeText(history.requestedEndMs, zone)}\n实际返回  ${timeText(history.returnedStartMs, zone)} → ${timeText(history.returnedEndMs, zone)}\n采用 ${history.acceptedBuckets} 个汇总，跳过 ${history.skippedBuckets} 个。", style = MaterialTheme.typography.bodySmall)

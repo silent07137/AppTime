@@ -2,7 +2,7 @@
 
 Android v1.3.0 实现手动加密导出、预览、合并与替换恢复。协议独立于 Room 数据库版本；不包含数据库二进制、WAL、凭据、SAF URI、图标缓存或派生每日缓存。
 
-Windows 0.1.0 复用 v1 封装及字段清单，接受 Android 档案并新增 `platform=windows`、`metric=windows_active_foreground`、`source=windows_foreground_poll`，严格验证来源设备与 metric 匹配。窗口采样、空闲阈值和单调时钟边界见 [Windows 验证说明](../windows/VALIDATION.md)。Windows 不导入其他设备的本机采集进度；本机 UUID 保持不变。当前 Android v1.3.1 的平台校验仍只接受 Android，因此含 Windows 行的备份暂不能反向恢复到该 Android 版本。
+Windows 0.2.0 与 Android v1.3.2 复用 v1 封装及字段清单，支持双向交换。Windows 使用 `platform=windows`、`metric=windows_active_foreground`、`source=windows_foreground_poll`，严格验证来源设备与 metric/source 匹配。窗口采样边界见 [Windows 验证说明](../windows/VALIDATION.md)。外来档案不接管本机采集身份或进度；Android 不能把 Windows UUID 当作原手机身份。Android v1.3.1 及更早版本仍拒绝 Windows 平台行。
 
 ## 加密封装
 
@@ -43,7 +43,7 @@ ZIP 恰好含 `manifest.json` 与下表的 12 个 `.jsonl` 文件。只接受 ST
 | collection_state | source, recordFromMs, checkpointMs, lastSuccessMs, enabled, status, detail |
 | history_import_state | source, requestedStartMs, requestedEndMs, returnedStartMs, returnedEndMs, acceptedBuckets, skippedBuckets, lastAttemptMs, status, detail |
 
-字段类型、主键、NULL 约束见 [Room v5 schema](../android/app/schemas/io.github.silent07137.apptime.data.AppDatabase/5.json)。本协议字段由显式清单固定，未来数据库内部新增列不会自动导出。时间为 UTC 毫秒；日期为 ISO 日期，时区为 IANA ID，历史未知时区为 `unknown`。仅接受 Android 来源：事件 metric/source 为 `android_foreground` / `android_usage_events`；导入进度 source 为 `android_usage_stats_daily` 或 `android_usage_stats_best`。
+字段类型、主键、NULL 约束见 [Room v5 schema](../android/app/schemas/io.github.silent07137.apptime.data.AppDatabase/5.json)。字段由显式清单固定，内部新增列不自动导出。时间为 UTC 毫秒，日期为 ISO 日期，时区为 IANA ID，历史未知时区为 `unknown`。Android 会话 metric/source 为 `android_foreground` / `android_usage_events`；Windows 为 `windows_active_foreground` / `windows_foreground_poll`，必须匹配身份所属设备的平台。系统汇总和历史桶仅接受 Android 设备，历史 source 为 `android_usage_stats_daily` 或 `android_usage_stats_best`；采集进度仅支持原 Android 行，恢复到另一设备时不接管。
 
 manifest 的 `format_version` 与 `schema_version` 均为整数 1，包含 `snapshot_id`、`created_at`、`exporting_device_id`、`device_coverage` 及 `files`。每个文件的元数据包含 `rows`、`bytes`、`sha256`（小写十六进制），对解压后的原始文件字节计算。设备覆盖条目含 `device_id`、`start_utc_ms`、`end_utc_ms`、`quality`；当前仅报告保存会话的外包范围，quality 始终为 partial，不能把其间缺口视为已覆盖。
 
@@ -57,7 +57,7 @@ manifest 的 `format_version` 与 `schema_version` 均为整数 1，包含 `snap
 
 每次恢复前，先加密当前一致性快照，再解密回读验证，保存为应用私有目录中的恢复前备份；口令为本次输入的备份口令。替换还需二次确认。数据写入、活动采集身份更新、每日缓存重建在同一 Room 事务完成。恢复前备份可在设置中另行导出，下一次恢复会替换该保护文件；应用卸载会删除私有保护文件。导出到 SAF 后回读长度与 SHA-256，验证通过才显示成功。
 
-原始时段与各设备来源时区保留，每日汇总保留来源设备报表日期；多设备总计为设备之和，暂不估算跨设备并集。Room v6 的 `calendarAligned` 仅为派生校验标记，不属于备份 v1 字段；恢复时按来源设备时区重建，跨午夜的系统桶不能当作起始日期的整日用时。Windows 初版已实现独立 GUI/采集；双向平台恢复、逻辑应用映射、自动备份、WebDAV 和作业历史尚未完成。
+原始时段与各设备来源时区保留。两端总览与趋势选择来源设备，Android 应用前台与 Windows 活跃前台不混算。Windows 不同 UUID 的会话即使因回拨时钟重复墙钟范围也保留各自时长；Android 事件仍按并集。忽略范围从派生统计扣除，原始会话不删除。Room v6 的 `calendarAligned` 为派生标记，不属于备份 v1；恢复时重建，跨午夜的系统桶不能当作整日用时。逻辑应用映射、自动备份、WebDAV 和作业历史尚未完成。
 
 ## 跨运行时样例
 

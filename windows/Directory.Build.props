@@ -5,7 +5,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <Deterministic>true</Deterministic>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <Authors>AppTime contributors</Authors>
     <PackageLicenseExpression>GPL-2.0-only</PackageLicenseExpression>

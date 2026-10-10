@@ -112,9 +112,9 @@ data class Interval(val startMs: Long, val endMs: Long) {
 }
 
 object UsageMath {
-    fun subtract(intervals: List<Interval>, authority: List<Interval>): List<Interval> {
+    fun subtract(intervals: List<Interval>, authority: List<Interval>, unionObservations: Boolean = true): List<Interval> {
         val cuts = union(authority)
-        return union(intervals).flatMap { interval ->
+        return (if (unionObservations) union(intervals) else intervals).flatMap { interval ->
             var cursor = interval.startMs
             val fragments = mutableListOf<Interval>()
             for (cut in cuts) {
@@ -138,9 +138,9 @@ object UsageMath {
         return result
     }
 
-    fun daily(intervals: List<Interval>, zone: ZoneId): Map<LocalDate, Long> {
+    fun daily(intervals: List<Interval>, zone: ZoneId, unionObservations: Boolean = true): Map<LocalDate, Long> {
         val result = sortedMapOf<LocalDate, Long>()
-        for (interval in union(intervals)) {
+        for (interval in if (unionObservations) union(intervals) else intervals) {
             var cursor = interval.startMs
             while (cursor < interval.endMs) {
                 val date = Instant.ofEpochMilli(cursor).atZone(zone).toLocalDate()

@@ -15,11 +15,13 @@ public sealed class Collector
     private readonly List<Gap> gaps = [];
     public long IdleThresholdMs { get; set; } = 300_000;
     public string Timezone { get; set; } = TimeZones.LocalIana;
+    public HashSet<string> IgnoredKeys { get; set; } = [];
     public string Status { get; private set; } = "等待前台应用";
     public AppIdentity? Foreground { get; private set; }
 
     public void Poll(Sample next)
     {
+        if (next.Blocked == null && next.App != null && IgnoredKeys.Contains(next.App.Key)) next = next with { Blocked = "已忽略" };
         bool active = next.Blocked == null && next.App != null && (IdleThresholdMs == 0 || next.IdleMs < IdleThresholdMs);
         Foreground = active ? next.App : null;
         Status = next.Blocked ?? (next.App == null ? "无法读取前台应用" : active ? "正在记录" : "空闲暂停");
@@ -54,7 +56,7 @@ public sealed class Collector
                 if (!active || next.App?.Key != last.App.Key) Close();
             }
             else Close();
-            if (delta is > 0 and <= 5000 && (last.Blocked != null || last.App == null) && next.UtcMs > last.UtcMs)
+            if (delta is > 0 and <= 5000 && last.Blocked != "已忽略" && (last.Blocked != null || last.App == null) && next.UtcMs > last.UtcMs)
                 gaps.Add(new(last.UtcMs, next.UtcMs, last.Blocked ?? "无法读取前台应用"));
         }
         previous = next;
@@ -75,6 +77,13 @@ public static class TimeZones
 {
     public static string LocalIana => TimeZoneInfo.TryConvertWindowsIdToIanaId(TimeZoneInfo.Local.Id, out var id) ? id : TimeZoneInfo.Local.Id;
     public static TimeZoneInfo Find(string id) => TimeZoneInfo.FindSystemTimeZoneById(id);
+    public static string Iana(string id)
+    {
+        Find(id);
+        if (TimeZoneInfo.TryConvertWindowsIdToIanaId(id, out var converted)) return converted;
+        if (id == "UTC" || TimeZoneInfo.TryConvertIanaIdToWindowsId(id, out _)) return id;
+        throw new ArgumentException("请使用 IANA 时区名称");
+    }
     public static long Midnight(DateOnly day, string zone)
     {
         var tz = Find(zone); var local = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);

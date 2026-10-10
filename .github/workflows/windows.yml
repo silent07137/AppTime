@@ -43,8 +43,9 @@ jobs:
           Copy-Item README.md,../LICENSE -Destination out/light
           Copy-Item README.md,../LICENSE -Destination out/standalone
           New-Item -ItemType Directory -Force out/packages | Out-Null
-          Compress-Archive out/light/* out/packages/AppTime-Windows-0.1.0-x64.zip
-          Compress-Archive out/standalone/* out/packages/AppTime-Windows-0.1.0-x64-standalone.zip
+          $version = ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version
+          Compress-Archive out/light/* "out/packages/AppTime-Windows-$version-x64.zip"
+          Compress-Archive out/standalone/* "out/packages/AppTime-Windows-$version-x64-standalone.zip"
           Get-ChildItem out/packages/*.zip | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name } | Set-Content out/packages/SHA256SUMS.txt -Encoding utf8NoBOM
           $env:GITHUB_SHA | Set-Content out/packages/SOURCE_COMMIT.txt -Encoding utf8NoBOM
       - uses: actions/upload-artifact@v4

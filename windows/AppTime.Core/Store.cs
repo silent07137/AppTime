@@ -7,6 +7,8 @@ namespace AppTime.Core;
 public record Column(string Name, string Type, bool Required);
 public record Table(string Name, string Sql, Column[] Columns, string[] Keys);
 public record Device(string Id, string Platform, string Timezone, long CreatedAt);
+public record Preference(string Category = "未分类", bool Hidden = false, bool Ignored = false, long Revision = 0);
+public record Adjustment(string Id, long DeltaMs, string Note, string Timezone);
 public sealed class Store : IDisposable
 {
     public static readonly Table[] Tables = JsonSerializer.Deserialize<Table[]>(
@@ -51,8 +53,84 @@ public sealed class Store : IDisposable
     public string LocalTimezone => Devices().Single(d => d.Id == LocalDeviceId).Timezone;
     public void ChangeTimezone(string zone)
     {
-        TimeZones.Find(zone);
+        zone = TimeZones.Iana(zone);
         lock (Gate) InTransaction(() => { Run("UPDATE devices SET reportTimezone=$p0 WHERE deviceId=$p1", zone, LocalDeviceId); Version++; });
+    }
+
+    public Preference Preference(string id)
+    {
+        lock (Gate)
+        {
+            var row = Rows("SELECT * FROM app_preferences WHERE identityId=$p0", id).SingleOrDefault();
+            return row == null ? new() : new(S(row,"category"), N(row,"hidden")==1, N(row,"ignored")==1, N(row,"revision"));
+        }
+    }
+    private void RequireLocal(string id)
+    {
+        if (Scalar("SELECT deviceId FROM app_identities WHERE identityId=$p0", id) as string != LocalDeviceId)
+            throw new InvalidDataException("请在来源设备修改此档案");
+    }
+    private void WritePreference(string id, Preference value)
+    {
+        if (value.Revision >= 1_000_000_000) throw new InvalidDataException("档案修订次数超过限制");
+        Run("INSERT INTO app_preferences VALUES($p0,$p1,$p2,$p3,$p4) ON CONFLICT(identityId) DO UPDATE SET category=excluded.category,hidden=excluded.hidden,ignored=excluded.ignored,revision=excluded.revision",
+            id, value.Category, value.Hidden ? 1 : 0, value.Ignored ? 1 : 0, value.Revision+1);
+    }
+    public void UpdatePreference(string id, string? category=null, bool? hidden=null)
+    {
+        category=category?.Trim();
+        if (category!=null && category.Length is <1 or >24) throw new InvalidDataException("分类名称需为 1–24 个字");
+        lock (Gate) InTransaction(() =>
+        {
+            RequireLocal(id); var old=Preference(id); var next=old with { Category=category ?? old.Category, Hidden=hidden ?? old.Hidden };
+            if (next==old) return;
+            WritePreference(id,next); Version++;
+        });
+    }
+    public HashSet<string> IgnoredKeys()
+    {
+        lock (Gate) return Rows("SELECT i.packageName FROM app_preferences p JOIN app_identities i ON i.identityId=p.identityId WHERE p.ignored=1 AND i.deviceId=$p0", LocalDeviceId).Select(r=>S(r,"packageName")).ToHashSet();
+    }
+    public void SetIgnored(string id, bool ignored, long now)
+    {
+        if (now is <0 or >253402300799999) throw new ArgumentOutOfRangeException(nameof(now));
+        lock (Gate) InTransaction(() =>
+        {
+            RequireLocal(id); var old=Preference(id); if (old.Ignored==ignored) return;
+            if (ignored) Run("INSERT INTO ignore_periods VALUES($p0,$p1,$p2,NULL,1)", Guid.NewGuid().ToString(),id,now);
+            else Run("UPDATE ignore_periods SET endMs=MAX(startMs,$p0),revision=revision+1 WHERE identityId=$p1 AND endMs IS NULL",now,id);
+            WritePreference(id,old with { Ignored=ignored }); Version++;
+        });
+    }
+    public List<Adjustment> Adjustments(string id, DateOnly date)
+    {
+        lock (Gate) return Rows("SELECT * FROM manual_adjustments WHERE identityId=$p0 AND reportDate=$p1 AND deleted=0 ORDER BY createdAtMs,adjustmentId",id,date.ToString("yyyy-MM-dd"))
+            .Select(r=>new Adjustment(S(r,"adjustmentId"),N(r,"deltaMs"),S(r,"note"),S(r,"timezone"))).ToList();
+    }
+    public void AddAdjustment(string id, DateOnly date, long delta, string note, long now)
+    {
+        if (delta==0 || delta is < -86400000 or >86400000) throw new InvalidDataException("修正量需在 ±24 小时内且不为零");
+        note=note.Trim(); if (note.Length>120) throw new InvalidDataException("备注最多 120 个字");
+        lock (Gate)
+        {
+            RequireLocal(id); string zone=LocalTimezone;
+            if (date>TimeZones.Date(now,zone)) throw new InvalidDataException("不能修正未来日期");
+            var app=Statistics.Read(this,LocalDeviceId).Apps.Single(a=>a.Id==id);
+            if (app.Total+delta<0 || app.Days.GetValueOrDefault(date)+delta<0) throw new InvalidDataException("扣减后的时长不能小于零");
+            InTransaction(()=>Run("INSERT INTO manual_adjustments VALUES($p0,$p1,$p2,$p3,$p4,$p5,$p6,1,0)",Guid.NewGuid().ToString(),id,date.ToString("yyyy-MM-dd"),zone,delta,note,now)); Version++;
+        }
+    }
+    public void UndoAdjustment(string adjustmentId)
+    {
+        lock (Gate)
+        {
+            var row=Rows("SELECT * FROM manual_adjustments WHERE adjustmentId=$p0 AND deleted=0",adjustmentId).SingleOrDefault(); if (row==null) return;
+            string id=S(row,"identityId"); RequireLocal(id);
+            var app=Statistics.Read(this,LocalDeviceId).Apps.Single(a=>a.Id==id); long delta=N(row,"deltaMs");
+            if (app.Total-delta<0 || app.Days.GetValueOrDefault(DateOnly.ParseExact(S(row,"reportDate"),"yyyy-MM-dd"))-delta<0)
+                throw new InvalidDataException("请先撤销依赖这条补记的扣减");
+            InTransaction(()=>Run("UPDATE manual_adjustments SET deleted=1,revision=revision+1 WHERE adjustmentId=$p0",adjustmentId)); Version++;
+        }
     }
 
     public void Save((List<Session> Sessions, List<Gap> Gaps) batch)

@@ -129,7 +129,7 @@ import kotlinx.coroutines.*
                 Text("${prepared.devices} 台设备 · ${prepared.apps} 个应用 · ${prepared.records} 条时段")
                 RestoreChoice("合并档案", !replace, !busy) { replace = false }
                 RestoreChoice("替换档案", replace, !busy) { replace = true }
-                if (replace) BackupCheckbox("这是原来的手机", samePhone, !busy) { samePhone = it }
+                if (replace && prepared.originPlatform == "android") BackupCheckbox("这是原来的手机", samePhone, !busy) { samePhone = it }
                 Text(if (replace && samePhone) "沿用备份中的采集身份" else if (replace) "保留原设备来源，本机重新开始记录" else "保留本机采集身份，重复记录不会累加", style = MaterialTheme.typography.bodySmall)
             } }, confirmButton = { TextButton(enabled = !busy, onClick = { if (replace) confirmReplace = true else applyRestore() }) { Text("恢复") } },
             dismissButton = { TextButton(enabled = !busy, onClick = { prepared.close(); plan = null; restorePassword?.fill('\u0000'); restorePassword = null }) { Text("取消") } })

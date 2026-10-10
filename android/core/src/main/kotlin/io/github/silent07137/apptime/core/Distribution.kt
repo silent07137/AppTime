@@ -9,11 +9,11 @@ data class HourUsage(val startMs: Long, val endMs: Long, val durationMs: Long)
 
 /** Union each application's observations, then sum apps. Never invent hourly history. */
 object UsageDistribution {
-    fun hours(date: LocalDate, zone: ZoneId, records: List<AppInterval>): List<HourUsage> {
+    fun hours(date: LocalDate, zone: ZoneId, records: List<AppInterval>, unionObservations: Boolean = true): List<HourUsage> {
         val start = date.atStartOfDay(zone).toInstant().toEpochMilli()
         val end = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
         val intervals = records.groupBy { it.identityId }.values.flatMap { rows ->
-            UsageMath.union(rows.map { it.interval })
+            rows.map { it.interval }.let { if (unionObservations) UsageMath.union(it) else it }
         }
         val result = mutableListOf<HourUsage>()
         var cursor = start

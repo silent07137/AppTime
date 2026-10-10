@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -16,7 +17,8 @@ public sealed class NativeSource
     private IntPtr lastWindow;
     private AppIdentity? lastApp;
     private long readAt;
-    public AppIdentity? ReadWindow(IntPtr window) { GetWindowThreadProcessId(window,out uint pid); return Resolve(window,pid); }
+    private bool lastHosted;
+    public AppIdentity? ReadWindow(IntPtr window) { GetWindowThreadProcessId(window,out uint pid); return Resolve(window,pid,out _); }
     public uint ForegroundPid { get { GetWindowThreadProcessId(GetForegroundWindow(),out uint pid); return pid; } }
     public Sample Read(string? blocked=null)
     {
@@ -26,24 +28,27 @@ public sealed class NativeSource
         long idle=unchecked((uint)Environment.TickCount-info.dwTime);
         // On the secure desktop there is no ordinary foreground window. Never read its contents.
         IntPtr window=GetForegroundWindow(); GetWindowThreadProcessId(window,out uint pid);
-        if (pid!=lastPid || window!=lastWindow || mono-readAt>30000 || lastApp==null)
+        if (pid!=lastPid || window!=lastWindow || mono-readAt>30000 || lastApp==null || lastHosted)
         {
-            lastPid=pid; lastWindow=window; readAt=mono; lastApp=Resolve(window,pid);
+            lastPid=pid; lastWindow=window; readAt=mono; lastApp=Resolve(window,pid,out lastHosted);
         }
         return new(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),mono,idle,lastApp,blocked);
     }
-    private static AppIdentity? Resolve(IntPtr window,uint pid)
+    private static AppIdentity? Resolve(IntPtr window,uint pid,out bool hosted)
     {
+        hosted=false;
         try
         {
             string? path=Image(pid);
             if (path==null) return null;
             if (Path.GetFileName(path).Equals("ApplicationFrameHost.exe",StringComparison.OrdinalIgnoreCase))
             {
-                uint childPid=0;
-                EnumWindowsCallback callback=(child,_)=> { GetWindowThreadProcessId(child,out uint candidate); if (candidate!=pid && candidate!=0) { childPid=candidate; return false; } return true; };
+                hosted=true; var children=new HashSet<uint>(); uint hostPid=pid;
+                EnumWindowsCallback callback=(child,_)=> { GetWindowThreadProcessId(child,out uint candidate); if (candidate!=hostPid && candidate!=0) children.Add(candidate); return true; };
                 EnumChildWindows(window,callback,IntPtr.Zero); GC.KeepAlive(callback);
-                if (childPid==0 || (path=Image(childPid))==null) return null; pid=childPid;
+                var candidates=children.Select(p=>new { Pid=p,Family=Family(p),Path=Image(p) }).Where(p=>p.Family.Length>0 && p.Path!=null).ToList();
+                if (candidates.Select(p=>p.Family).Distinct().Count()!=1) return null;
+                pid=candidates[0].Pid; path=candidates[0].Path!;
             }
             var metadata=FileVersionInfo.GetVersionInfo(path);
             string name=string.IsNullOrWhiteSpace(metadata.ProductName) ? Path.GetFileNameWithoutExtension(path) : metadata.ProductName;

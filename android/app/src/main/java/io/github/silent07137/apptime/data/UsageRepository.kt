@@ -42,11 +42,15 @@ class UsageRepository(
             if (snapshot.calendarAligned != aligned) dao.setCalendarAligned(snapshot.identityId, snapshot.reportDate, aligned)
         }
         for ((id, sessions) in dao.allSessions().groupBy { it.identityId }) {
-            val zone = ZoneId.of(requireNotNull(devices[sessions.first().originDeviceId]).reportTimezone)
-            val intervals = sessions.map { Interval(it.startMs, it.endMs) }
-            dao.saveEventDays(UsageMath.daily(intervals, zone).map { (date, ms) -> EventDailyEntity(id, date.toString(), zone.id, ms) })
+            val device = requireNotNull(devices[sessions.first().originDeviceId])
+            val zone = ZoneId.of(device.reportTimezone)
+            val union = device.platform != "windows"
+            val raw = sessions.map { Interval(it.startMs, it.endMs) }
+            val intervals = UsageMath.subtract(raw, ignoreIntervals(id, raw.maxOf { it.endMs }), union)
+            dao.saveEventDays(UsageMath.daily(intervals, zone, union).map { (date, ms) -> EventDailyEntity(id, date.toString(), zone.id, ms) })
+            if (intervals.isEmpty()) continue
             val start = intervals.minOf { it.startMs }; val end = intervals.maxOf { it.endMs }
-            dao.saveDays(UsageMath.daily(UsageMath.subtract(intervals, historyOwnership(id, start, end)), zone).map { (date, ms) -> DailyEntity(id, date.toString(), zone.id, ms) })
+            dao.saveDays(UsageMath.daily(UsageMath.subtract(intervals, historyOwnership(id, start, end), union), zone, union).map { (date, ms) -> DailyEntity(id, date.toString(), zone.id, ms) })
             rebuildSystemSupplements(id, Instant.ofEpochMilli(start).atZone(zone).toLocalDate(), Instant.ofEpochMilli(end - 1).atZone(zone).toLocalDate(), zone)
         }
         dao.saveDailySyncState(DailySyncState(initialDone = false, eventRebuilt = true))

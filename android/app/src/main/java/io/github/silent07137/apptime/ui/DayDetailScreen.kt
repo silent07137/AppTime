@@ -32,7 +32,7 @@ import java.time.format.DateTimeFormatter
 
 private data class DisplayPeriod(val app: DaySession, val start: Long, val end: Long)
 
-@Composable internal fun DayDetailScreen(date: LocalDate, initialId: String?, category: String?, repo: UsageRepository, zone: ZoneId, apps: List<AppSummary>, onDate: (LocalDate) -> Unit, onApp: (String) -> Unit) {
+@Composable internal fun DayDetailScreen(date: LocalDate, initialId: String?, category: String?, repo: UsageRepository, zone: ZoneId, apps: List<AppSummary>, deviceId: String, onDate: (LocalDate) -> Unit, onApp: (String) -> Unit) {
     var identity by rememberSaveable(date, initialId) { mutableStateOf(initialId) }
     var selectedHour by rememberSaveable(date, identity) { mutableIntStateOf(-1) }
     var picking by remember { mutableStateOf(false) }
@@ -40,17 +40,22 @@ private data class DisplayPeriod(val app: DaySession, val start: Long, val end: 
     val today = LocalDate.now(zone)
     val start = date.atStartOfDay(zone).toInstant().toEpochMilli()
     val end = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-    val dailyApps by remember(date, identity, category) { repo.dao.observeDayApps(date.toString(), identity, category) }.collectAsStateWithLifecycle(initialValue = emptyList())
-    val sessions by remember(start, end, identity, category) { repo.dao.observeDaySessions(start, end, identity, category) }.collectAsStateWithLifecycle(initialValue = emptyList())
-    val periods = remember(sessions, start, end) {
+    val dailyApps by remember(date, identity, category, deviceId) { repo.dao.observeDayApps(date.toString(), identity, category, deviceId) }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val sessions by remember(start, end, identity, category, deviceId) { repo.dao.observeDaySessions(start, end, identity, category, deviceId) }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val ignores by remember(deviceId) { repo.dao.observeIgnorePeriods(deviceId) }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val union = sessions.none { it.metric == "windows_active_foreground" }
+    val periods = remember(sessions, ignores, start, end) {
         sessions.groupBy { it.identityId }.values.flatMap { group ->
-            UsageMath.union(group.map { Interval(maxOf(start, it.startMs), minOf(end, it.endMs)) }).map { interval ->
+            val cuts = ignores.filter { it.identityId == group.first().identityId }.mapNotNull {
+                val to = it.endMs ?: end; if (to > it.startMs) Interval(it.startMs, to) else null
+            }
+            UsageMath.subtract(group.map { Interval(maxOf(start, it.startMs), minOf(end, it.endMs)) }, cuts, group.first().metric != "windows_active_foreground").map { interval ->
                 val overlapping = group.filter { it.startMs < interval.endMs && it.endMs > interval.startMs }
                 DisplayPeriod(overlapping.first().copy(provisional = overlapping.any { it.provisional }, transitionEstimated = overlapping.any { it.transitionEstimated }), interval.startMs, interval.endMs)
             }
         }.sortedBy { it.start }
     }
-    val hours = remember(periods, date, zone) { UsageDistribution.hours(date, zone, periods.map { AppInterval(it.app.identityId, Interval(it.start, it.end)) }) }
+    val hours = remember(periods, date, zone, union) { UsageDistribution.hours(date, zone, periods.map { AppInterval(it.app.identityId, Interval(it.start, it.end)) }, union) }
     val hour = hours.getOrNull(selectedHour)
     val visiblePeriods = if (hour == null) periods else periods.mapNotNull {
         val from = maxOf(it.start, hour.startMs); val to = minOf(it.end, hour.endMs)

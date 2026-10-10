@@ -40,7 +40,6 @@ fun AppScreen(repo: UsageRepository, collecting: MutableStateFlow<Boolean>, impo
     access: MutableStateFlow<Boolean>, refresh: () -> Unit, openPermission: () -> Unit, importHistory: (Int) -> Unit) {
     val allApps by remember(repo) { repo.dao.observeApps() }.collectAsStateWithLifecycle(initialValue = emptyList())
     val apps = allApps.filter { it.durationMs + it.historicalMs + it.recordedMs + kotlin.math.abs(it.adjustmentMs) > 0 }
-    val visible = apps.filter { !it.hidden }
     val state by remember(repo) { repo.dao.observeState() }.collectAsStateWithLifecycle(initialValue = null)
     val history by remember(repo) { repo.dao.observeHistoryState() }.collectAsStateWithLifecycle(initialValue = null)
     val gaps by remember(repo) { repo.dao.observeGapCount() }.collectAsStateWithLifecycle(initialValue = 0)
@@ -71,9 +70,14 @@ fun AppScreen(repo: UsageRepository, collecting: MutableStateFlow<Boolean>, impo
         catch (_: Exception) { snackbar.showSnackbar("保存失败，请稍后重试") }
     } }
     LaunchedEffect(state, devices) { withContext(Dispatchers.IO) { repo.dao.device() }?.let { zone = ZoneId.of(it.reportTimezone); localDeviceId = it.deviceId } }
-    val deviceLabels = devices.associate { it.deviceId to if (it.deviceId == localDeviceId) "本机" else "导入设备 ${it.deviceId.take(8)}" }
-    val today = LocalDate.now(zone)
-    val days by remember(repo, today) { repo.dao.observeDays(today.minusDays(6).toString(), today.toString()) }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val deviceLabels = devices.associate { it.deviceId to if (it.deviceId == localDeviceId) "本机 · 应用前台" else if (it.platform == "windows") "Windows ${it.deviceId.take(8)} · 活跃前台" else "Android ${it.deviceId.take(8)} · 应用前台" }
+    var selectedDevice by rememberSaveable { mutableStateOf<String?>(null) }
+    val viewId = selectedDevice?.takeIf { chosen -> devices.any { it.deviceId == chosen } } ?: localDeviceId.orEmpty()
+    val viewZone = devices.firstOrNull { it.deviceId == viewId }?.reportTimezone?.let(ZoneId::of) ?: zone
+    val deviceApps = apps.filter { it.deviceId == viewId }
+    val visible = deviceApps.filter { !it.hidden }
+    val today = LocalDate.now(viewZone)
+    val days by remember(repo, today, viewId) { repo.dao.observeDays(today.minusDays(6).toString(), today.toString(), deviceId = viewId) }.collectAsStateWithLifecycle(initialValue = emptyList())
     fun push(route: String) { if (routes.last() != route) { forwardNavigation = true; routes = routes + route } }
     fun back() { if (routes.size > 1) { forwardNavigation = false; routes = routes.dropLast(1) } }
     fun openDay(date: LocalDate, id: String? = null, category: String? = null) {
@@ -124,6 +128,9 @@ fun AppScreen(repo: UsageRepository, collecting: MutableStateFlow<Boolean>, impo
                     modifier = Modifier.semantics { contentDescription = "刷新记录" }) { Glyph(Symbol.REFRESH) }
             }
             AnimatedVisibility(busy || historyBusy, enter = fadeIn(), exit = fadeOut()) { LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp)) }
+            if (root && tab in listOf(0, 2) && devices.size > 1) Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)) {
+                Choice(deviceLabels[viewId].orEmpty(), deviceLabels.values.toList(), { label -> selectedDevice = deviceLabels.entries.first { it.value == label }.key })
+            }
             if (!authorized && page == "tab:0") Card(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -162,15 +169,15 @@ fun AppScreen(repo: UsageRepository, collecting: MutableStateFlow<Boolean>, impo
                     activePage.startsWith("day:") -> {
                         val parts = activePage.removePrefix("day:").split('|')
                         val date = LocalDate.parse(parts[0])
-                        val owner = allApps.firstOrNull { it.identityId == parts[1] }?.deviceId
+                        val owner = allApps.firstOrNull { it.identityId == parts[1] }?.deviceId ?: viewId
                         val dayZone = devices.firstOrNull { it.deviceId == owner }?.reportTimezone?.let(ZoneId::of) ?: zone
-                        DayDetailScreen(date, parts[1].ifEmpty { null }, Uri.decode(parts[2]).ifEmpty { null }, repo, dayZone, allApps,
+                        DayDetailScreen(date, parts[1].ifEmpty { null }, Uri.decode(parts[2]).ifEmpty { null }, repo, dayZone, allApps.filter { it.deviceId == owner }, owner,
                             onDate = { changed -> routes = routes.dropLast(1) + "day:$changed|${parts[1]}|${parts[2]}" },
                             onApp = { push("app:$it") })
                     }
                     else -> when (activePage.removePrefix("tab:").toInt()) {
                         0 -> LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                            item { TotalCard(apps, apps.any { it.recordedMs > 0 }, history, zone, devices.size > 1) { showInfo = true } }
+                            item { TotalCard(deviceApps, deviceApps.any { it.recordedMs > 0 }, history.takeIf { viewId == localDeviceId }, viewZone, false) { showInfo = true } }
                             if (state?.status in listOf("不可用", "存在缺口", "采集失败")) item {
                                 TextButton(onClick = { showInfo = true }) { Text(state?.status ?: "数据状态"); Glyph(Symbol.CHEVRON, Modifier.size(18.dp)) }
                             }
@@ -188,7 +195,7 @@ fun AppScreen(repo: UsageRepository, collecting: MutableStateFlow<Boolean>, impo
                             item { DayChart(today.minusDays(6), today, days) { openDay(it) } }
                         }
                         1 -> AppListScreen(apps, deviceLabels = deviceLabels) { push("app:$it") }
-                        2 -> TrendScreen(repo, zone, allApps, ::openDay)
+                        2 -> key(viewId) { TrendScreen(repo, viewZone, allApps.filter { it.deviceId == viewId }, viewId, ::openDay) }
                         3 -> LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             item { SettingsCard("采集", if (authorized) "已授权" else "未授权") {
                                 TextButton(onClick = openPermission) { Text("管理权限") }

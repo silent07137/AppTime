@@ -10,6 +10,7 @@ signing.properties
 *.hprof
 *.atbackup
 !test-fixtures/backup-v1/golden.atbackup
+!test-fixtures/backup-v1/windows-golden.atbackup
 **/bin/
 **/obj/
 windows/out/

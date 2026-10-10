@@ -99,7 +99,7 @@ import kotlinx.coroutines.withContext
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable internal fun TrendScreen(repo: UsageRepository, zone: ZoneId, apps: List<AppSummary>, onDay: (LocalDate, String?, String?) -> Unit) {
+@Composable internal fun TrendScreen(repo: UsageRepository, zone: ZoneId, apps: List<AppSummary>, deviceId: String, onDay: (LocalDate, String?, String?) -> Unit) {
     val today = LocalDate.now(zone)
     var range by rememberSaveable { mutableIntStateOf(7) }
     var startText by rememberSaveable { mutableStateOf(today.minusDays(6).toString()) }
@@ -110,7 +110,7 @@ import kotlinx.coroutines.withContext
     val start = LocalDate.parse(startText)
     val end = LocalDate.parse(endText)
     val cat = category.takeIf { it != "全部分类" }
-    val days by remember(startText, endText, identity, cat) { repo.dao.observeDays(startText, endText, identity, cat) }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val days by remember(startText, endText, identity, cat, deviceId) { repo.dao.observeDays(startText, endText, identity, cat, deviceId) }.collectAsStateWithLifecycle(initialValue = emptyList())
     if (picking) {
         val picker = rememberDateRangePickerState(initialSelectedStartDateMillis = start.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
             initialSelectedEndDateMillis = end.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),

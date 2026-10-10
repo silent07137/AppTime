@@ -77,6 +77,45 @@ class ArchiveServiceTest {
         assertEquals(a.device, a.db.usageDao().device()!!.deviceId)
         assertEquals(0, merge(a, fixture))
     }
+    @Test fun windowsFixtureKeepsMetricRollbackIgnoresCorrectionsAndSourceDevice() = runBlocking {
+        val target = archive(records = false)
+        val fixture = InstrumentationRegistry.getInstrumentation().context.assets.open("windows-golden.atbackup").use { it.readBytes() }
+        var origin = ""; var app = ""
+        target.service.preview(fixture.inputStream(), password).use { plan ->
+            assertEquals("windows", plan.originPlatform)
+            origin = plan.manifest.getString("exporting_device_id")
+            app = JSONObject(File(plan.directory, "app_identities.jsonl").readText()).getString("identityId")
+            assertTrue(target.service.restore(plan, password, false) > 0)
+        }
+        assertEquals(target.device, target.db.usageDao().device()!!.deviceId)
+        val dao = target.db.usageDao()
+        assertEquals(130_000L, dao.appDay(app, "1970-01-01")!!.durationMs)
+        assertEquals(70_000L, dao.observeApps().first().first { it.identityId == app }.recordedMs)
+        assertEquals(130_000L, dao.observeDays("1970-01-01", deviceId = origin).first().single().durationMs)
+        assertTrue(dao.observeDays("1970-01-01", deviceId = target.device).first().isEmpty())
+        assertEquals("学习", dao.preference(app)!!.category)
+        assertEquals(0, merge(target, fixture))
+        val roundTrip = bytes(target)
+        val second = archive(records = false); assertTrue(merge(second, roundTrip) > 0)
+        assertEquals(130_000L, second.db.usageDao().appDay(app, "1970-01-01")!!.durationMs)
+        assertEquals(0, merge(second, roundTrip))
+        // Public synthetic output for the .NET codec to verify a real Android re-export.
+        File(InstrumentationRegistry.getInstrumentation().targetContext.cacheDir, "windows-roundtrip.atbackup").writeBytes(roundTrip)
+    }
+    @Test fun windowsCannotBecomeAndroidCollectorOrAcceptAndroidMetric() = runBlocking {
+        val target = archive(records = false)
+        val fixture = InstrumentationRegistry.getInstrumentation().context.assets.open("windows-golden.atbackup").use { it.readBytes() }
+        target.service.preview(fixture.inputStream(), password).use { plan ->
+            try { target.service.restore(plan, password, true, true); fail("Windows became Android collector") } catch (_: IllegalArgumentException) { }
+            val invalid = repackage(plan) { dir ->
+                val file = File(dir, "sessions.jsonl")
+                file.writeText(file.readLines().joinToString("\n", postfix = "\n") { line -> JSONObject(line).put("metric", "android_foreground").put("source", "android_usage_events").toString() })
+            }
+            try { target.service.preview(invalid.inputStream(), password).close(); fail("platform mismatch accepted") } catch (_: IllegalArgumentException) { }
+        }
+        assertEquals(target.device, target.db.usageDao().device()!!.deviceId)
+        assertEquals(1, target.db.usageDao().identities().size)
+    }
     @Test fun roundTripPreservesEveryRawTableAndDuplicateMergeIsZeroChanges() = runBlocking {
         val source = archive(); val target = archive(records = false)
         val data = bytes(source)
