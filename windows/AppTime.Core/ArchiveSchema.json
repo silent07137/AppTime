@@ -1,0 +1,556 @@
+[
+  {
+    "name": "devices",
+    "sql": "CREATE TABLE IF NOT EXISTS `devices` (`deviceId` TEXT NOT NULL, `platform` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `reportTimezone` TEXT NOT NULL, PRIMARY KEY(`deviceId`))",
+    "columns": [
+      {
+        "name": "deviceId",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "platform",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "createdAt",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "reportTimezone",
+        "type": "TEXT",
+        "required": true
+      }
+    ],
+    "keys": [
+      "deviceId"
+    ]
+  },
+  {
+    "name": "app_identities",
+    "sql": "CREATE TABLE IF NOT EXISTS `app_identities` (`identityId` TEXT NOT NULL, `deviceId` TEXT NOT NULL, `profileScope` TEXT NOT NULL, `packageName` TEXT NOT NULL, `displayName` TEXT NOT NULL, PRIMARY KEY(`identityId`), FOREIGN KEY(`deviceId`) REFERENCES `devices`(`deviceId`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+    "columns": [
+      {
+        "name": "identityId",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "deviceId",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "profileScope",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "packageName",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "displayName",
+        "type": "TEXT",
+        "required": true
+      }
+    ],
+    "keys": [
+      "identityId"
+    ]
+  },
+  {
+    "name": "sessions",
+    "sql": "CREATE TABLE IF NOT EXISTS `sessions` (`sessionId` TEXT NOT NULL, `originDeviceId` TEXT NOT NULL, `identityId` TEXT NOT NULL, `anchorMs` INTEGER NOT NULL, `startMs` INTEGER NOT NULL, `endMs` INTEGER NOT NULL, `durationMs` INTEGER NOT NULL, `timezone` TEXT NOT NULL, `utcOffsetSeconds` INTEGER NOT NULL, `metric` TEXT NOT NULL, `source` TEXT NOT NULL, `provisional` INTEGER NOT NULL, `transitionEstimated` INTEGER NOT NULL, `quality` TEXT NOT NULL, `revision` INTEGER NOT NULL, `deleted` INTEGER NOT NULL, PRIMARY KEY(`sessionId`), FOREIGN KEY(`identityId`) REFERENCES `app_identities`(`identityId`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`originDeviceId`) REFERENCES `devices`(`deviceId`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+    "columns": [
+      {
+        "name": "sessionId",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "originDeviceId",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "identityId",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "anchorMs",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "startMs",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "endMs",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "durationMs",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "timezone",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "utcOffsetSeconds",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "metric",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "provisional",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "transitionEstimated",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "quality",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "revision",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "deleted",
+        "type": "INTEGER",
+        "required": true
+      }
+    ],
+    "keys": [
+      "sessionId"
+    ]
+  },
+  {
+    "name": "historical_buckets",
+    "sql": "CREATE TABLE IF NOT EXISTS `historical_buckets` (`bucketId` TEXT NOT NULL, `originDeviceId` TEXT NOT NULL, `identityId` TEXT NOT NULL, `startMs` INTEGER NOT NULL, `endMs` INTEGER NOT NULL, `usageMs` INTEGER NOT NULL, `source` TEXT NOT NULL, `timezone` TEXT NOT NULL, `quality` TEXT NOT NULL, `revision` INTEGER NOT NULL, PRIMARY KEY(`bucketId`), FOREIGN KEY(`originDeviceId`) REFERENCES `devices`(`deviceId`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`identityId`) REFERENCES `app_identities`(`identityId`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+    "columns": [
+      {
+        "name": "bucketId",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "originDeviceId",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "identityId",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "startMs",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "endMs",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "usageMs",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "timezone",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "quality",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "revision",
+        "type": "INTEGER",
+        "required": true
+      }
+    ],
+    "keys": [
+      "bucketId"
+    ]
+  },
+  {
+    "name": "coverage",
+    "sql": "CREATE TABLE IF NOT EXISTS `coverage` (`coverageId` TEXT NOT NULL, `deviceId` TEXT NOT NULL, `startMs` INTEGER NOT NULL, `endMs` INTEGER NOT NULL, `status` TEXT NOT NULL, `reason` TEXT NOT NULL, PRIMARY KEY(`coverageId`), FOREIGN KEY(`deviceId`) REFERENCES `devices`(`deviceId`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+    "columns": [
+      {
+        "name": "coverageId",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "deviceId",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "startMs",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "endMs",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "reason",
+        "type": "TEXT",
+        "required": true
+      }
+    ],
+    "keys": [
+      "coverageId"
+    ]
+  },
+  {
+    "name": "system_daily_usage",
+    "sql": "CREATE TABLE IF NOT EXISTS `system_daily_usage` (`identityId` TEXT NOT NULL, `reportDate` TEXT NOT NULL, `timezone` TEXT NOT NULL, `durationMs` INTEGER NOT NULL, `bucketStartMs` INTEGER NOT NULL, `bucketEndMs` INTEGER NOT NULL, `observedAtMs` INTEGER NOT NULL, PRIMARY KEY(`identityId`, `reportDate`), FOREIGN KEY(`identityId`) REFERENCES `app_identities`(`identityId`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+    "columns": [
+      {
+        "name": "identityId",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "reportDate",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "timezone",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "durationMs",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "bucketStartMs",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "bucketEndMs",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "observedAtMs",
+        "type": "INTEGER",
+        "required": true
+      }
+    ],
+    "keys": [
+      "identityId",
+      "reportDate"
+    ]
+  },
+  {
+    "name": "app_preferences",
+    "sql": "CREATE TABLE IF NOT EXISTS `app_preferences` (`identityId` TEXT NOT NULL, `category` TEXT NOT NULL, `hidden` INTEGER NOT NULL, `ignored` INTEGER NOT NULL, `revision` INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(`identityId`), FOREIGN KEY(`identityId`) REFERENCES `app_identities`(`identityId`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+    "columns": [
+      {
+        "name": "identityId",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "category",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "hidden",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "ignored",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "revision",
+        "type": "INTEGER",
+        "required": true
+      }
+    ],
+    "keys": [
+      "identityId"
+    ]
+  },
+  {
+    "name": "ignore_periods",
+    "sql": "CREATE TABLE IF NOT EXISTS `ignore_periods` (`periodId` TEXT NOT NULL, `identityId` TEXT NOT NULL, `startMs` INTEGER NOT NULL, `endMs` INTEGER, `revision` INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(`periodId`), FOREIGN KEY(`identityId`) REFERENCES `app_identities`(`identityId`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+    "columns": [
+      {
+        "name": "periodId",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "identityId",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "startMs",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "endMs",
+        "type": "INTEGER",
+        "required": false
+      },
+      {
+        "name": "revision",
+        "type": "INTEGER",
+        "required": true
+      }
+    ],
+    "keys": [
+      "periodId"
+    ]
+  },
+  {
+    "name": "manual_adjustments",
+    "sql": "CREATE TABLE IF NOT EXISTS `manual_adjustments` (`adjustmentId` TEXT NOT NULL, `identityId` TEXT NOT NULL, `reportDate` TEXT NOT NULL, `timezone` TEXT NOT NULL, `deltaMs` INTEGER NOT NULL, `note` TEXT NOT NULL, `createdAtMs` INTEGER NOT NULL, `revision` INTEGER NOT NULL DEFAULT 1, `deleted` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`adjustmentId`), FOREIGN KEY(`identityId`) REFERENCES `app_identities`(`identityId`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+    "columns": [
+      {
+        "name": "adjustmentId",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "identityId",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "reportDate",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "timezone",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "deltaMs",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "note",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "createdAtMs",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "revision",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "deleted",
+        "type": "INTEGER",
+        "required": true
+      }
+    ],
+    "keys": [
+      "adjustmentId"
+    ]
+  },
+  {
+    "name": "app_observations",
+    "sql": "CREATE TABLE IF NOT EXISTS `app_observations` (`identityId` TEXT NOT NULL, `status` TEXT NOT NULL, `signingDigest` TEXT, `signingChanged` INTEGER NOT NULL, `observedAtMs` INTEGER NOT NULL, PRIMARY KEY(`identityId`), FOREIGN KEY(`identityId`) REFERENCES `app_identities`(`identityId`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+    "columns": [
+      {
+        "name": "identityId",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "signingDigest",
+        "type": "TEXT",
+        "required": false
+      },
+      {
+        "name": "signingChanged",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "observedAtMs",
+        "type": "INTEGER",
+        "required": true
+      }
+    ],
+    "keys": [
+      "identityId"
+    ]
+  },
+  {
+    "name": "collection_state",
+    "sql": "CREATE TABLE IF NOT EXISTS `collection_state` (`source` TEXT NOT NULL, `recordFromMs` INTEGER NOT NULL, `checkpointMs` INTEGER, `lastSuccessMs` INTEGER, `enabled` INTEGER NOT NULL, `status` TEXT NOT NULL, `detail` TEXT NOT NULL, PRIMARY KEY(`source`))",
+    "columns": [
+      {
+        "name": "source",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "recordFromMs",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "checkpointMs",
+        "type": "INTEGER",
+        "required": false
+      },
+      {
+        "name": "lastSuccessMs",
+        "type": "INTEGER",
+        "required": false
+      },
+      {
+        "name": "enabled",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "detail",
+        "type": "TEXT",
+        "required": true
+      }
+    ],
+    "keys": [
+      "source"
+    ]
+  },
+  {
+    "name": "history_import_state",
+    "sql": "CREATE TABLE IF NOT EXISTS `history_import_state` (`source` TEXT NOT NULL, `requestedStartMs` INTEGER NOT NULL, `requestedEndMs` INTEGER NOT NULL, `returnedStartMs` INTEGER, `returnedEndMs` INTEGER, `acceptedBuckets` INTEGER NOT NULL, `skippedBuckets` INTEGER NOT NULL, `lastAttemptMs` INTEGER NOT NULL, `status` TEXT NOT NULL, `detail` TEXT NOT NULL, PRIMARY KEY(`source`))",
+    "columns": [
+      {
+        "name": "source",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "requestedStartMs",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "requestedEndMs",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "returnedStartMs",
+        "type": "INTEGER",
+        "required": false
+      },
+      {
+        "name": "returnedEndMs",
+        "type": "INTEGER",
+        "required": false
+      },
+      {
+        "name": "acceptedBuckets",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "skippedBuckets",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "lastAttemptMs",
+        "type": "INTEGER",
+        "required": true
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "required": true
+      },
+      {
+        "name": "detail",
+        "type": "TEXT",
+        "required": true
+      }
+    ],
+    "keys": [
+      "source"
+    ]
+  }
+]

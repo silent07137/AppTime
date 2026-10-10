@@ -1,0 +1,54 @@
+name: Windows checks
+on:
+  push:
+    paths: ['windows/**', 'test-fixtures/**', '.github/workflows/windows.yml', 'LICENSE']
+  pull_request:
+    paths: ['windows/**', 'test-fixtures/**', '.github/workflows/windows.yml', 'LICENSE']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: windows
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.401'
+      - name: Restore locked dependencies
+        run: |
+          dotnet restore AppTime.Tests --locked-mode
+          dotnet restore AppTime.Desktop --locked-mode
+      - name: Core regressions
+        run: dotnet run --project AppTime.Tests -c Release --no-restore -- ../test-fixtures/backup-v1
+      - name: Build desktop
+        run: dotnet build AppTime.Desktop -c Release --no-restore
+      - name: Render UI and verify native window identity
+        run: |
+          $testDir = Join-Path $env:RUNNER_TEMP 'apptime-smoke'
+          $process = Start-Process -FilePath 'AppTime.Desktop/bin/Release/net10.0-windows/AppTime.exe' -ArgumentList "--data-dir `"$testDir`" --smoke-test" -WindowStyle Hidden -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            Get-Content (Join-Path $testDir 'smoke-error.txt') -ErrorAction SilentlyContinue
+            throw 'Desktop smoke test failed'
+          }
+          Get-Content (Join-Path $testDir 'smoke.json')
+      - name: Publish Windows x64 packages
+        run: |
+          dotnet publish AppTime.Desktop -c Release -r win-x64 --self-contained false -p:RestoreLockedMode=true -o out/light
+          dotnet publish AppTime.Desktop -c Release -r win-x64 --self-contained true -p:RestoreLockedMode=true -o out/standalone
+          Copy-Item README.md,../LICENSE -Destination out/light
+          Copy-Item README.md,../LICENSE -Destination out/standalone
+          New-Item -ItemType Directory -Force out/packages | Out-Null
+          Compress-Archive out/light/* out/packages/AppTime-Windows-0.1.0-x64.zip
+          Compress-Archive out/standalone/* out/packages/AppTime-Windows-0.1.0-x64-standalone.zip
+          Get-ChildItem out/packages/*.zip | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name } | Set-Content out/packages/SHA256SUMS.txt -Encoding utf8NoBOM
+          $env:GITHUB_SHA | Set-Content out/packages/SOURCE_COMMIT.txt -Encoding utf8NoBOM
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apptime-windows-${{ github.sha }}
+          if-no-files-found: error
+          path: windows/out/packages/*

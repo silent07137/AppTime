@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF><UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>AppTime</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets/AppTime.ico</ApplicationIcon>
+    <RuntimeFrameworkVersion>10.0.12</RuntimeFrameworkVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../AppTime.Core/AppTime.Core.csproj" />
+    <Resource Include="Assets/AppTime.ico" />
+    <Content Include="../../LICENSE" Link="LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../THIRD_PARTY_NOTICES.txt" Link="THIRD_PARTY_NOTICES.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../Apache-2.0.txt" Link="Apache-2.0.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="IncludeRuntimeLicenses" AfterTargets="Publish" Condition="'$(SelfContained)' == 'true'">
+    <Copy SourceFiles="$(NuGetPackageRoot)microsoft.netcore.app.runtime.win-x64/10.0.12/LICENSE.TXT" DestinationFiles="$(PublishDir)DOTNET-LICENSE.txt" />
+    <Copy SourceFiles="$(NuGetPackageRoot)microsoft.netcore.app.runtime.win-x64/10.0.12/THIRD-PARTY-NOTICES.TXT" DestinationFiles="$(PublishDir)DOTNET-THIRD-PARTY-NOTICES.txt" />
+    <Copy SourceFiles="$(NuGetPackageRoot)microsoft.windowsdesktop.app.runtime.win-x64/10.0.12/LICENSE" DestinationFiles="$(PublishDir)WPF-WINFORMS-LICENSE.txt" />
+  </Target>
+</Project>

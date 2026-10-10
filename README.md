@@ -1,6 +1,6 @@
 # AppTime
 
-离线记录 Android 应用的累计使用时长。支持 Android 10 及以上，采用 GPLv2 许可。
+离线记录应用使用时长。支持 Android 10 及以上；[Windows 原生客户端](windows/README.md)已提供 0.1.0 初版。采用 GPLv2 许可。
 
 [下载最新安装包](https://github.com/silent07137/AppTime/releases/latest)
 

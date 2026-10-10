@@ -12,6 +12,7 @@ signing.properties
 !test-fixtures/backup-v1/golden.atbackup
 **/bin/
 **/obj/
+windows/out/
 artifacts/
 /AppTime_Codex开发文档.md
 .DS_Store

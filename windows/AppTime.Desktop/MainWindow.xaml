@@ -1,0 +1,18 @@
+<Window x:Class="AppTime.Desktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="AppTime" Width="1120" Height="820" MinWidth="900" MinHeight="600" WindowStartupLocation="CenterScreen" Icon="Assets/AppTime.ico" Style="{StaticResource {x:Type Window}}">
+  <Grid>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+    <Border Background="{DynamicResource Surface}" Padding="18,28">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Margin="8,0,0,34"><Image Source="Assets/AppTime.ico" Width="38" Height="38" HorizontalAlignment="Left" Margin="0,0,0,12"/><TextBlock Text="AppTime" FontSize="25" FontWeight="SemiBold"/><TextBlock Text="WINDOWS" Foreground="{DynamicResource Muted}" FontSize="10" Margin="1,7,0,0"/></StackPanel>
+        <StackPanel DockPanel.Dock="Bottom" Margin="8,20,4,0"><TextBlock x:Name="StatusText" Text="等待前台应用" Foreground="{DynamicResource Muted}" FontSize="12"/><TextBlock x:Name="ForegroundText" Foreground="{DynamicResource Muted}" FontSize="12" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Margin="0,5,0,12"/><Button x:Name="PauseButton" Content="暂停记录" Click="PauseClicked" FontSize="12" Padding="12,8"/></StackPanel>
+        <StackPanel x:Name="Navigation" VerticalAlignment="Top"/>
+      </DockPanel>
+    </Border>
+    <Grid Grid.Column="1" Margin="32,28,32,0">
+      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+      <Grid Margin="0,0,0,26"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Orientation="Horizontal"><Button x:Name="BackButton" Content="←" Width="44" Padding="12,8" Margin="0,0,12,0" Visibility="Collapsed" Click="BackClicked"/><TextBlock x:Name="PageTitle" Text="总览" FontSize="28" FontWeight="SemiBold" VerticalAlignment="Center"/></StackPanel><ComboBox x:Name="DevicePicker" Grid.Column="1" Width="270" SelectionChanged="DeviceChanged" AutomationProperties.Name="来源设备"/></Grid>
+      <TextBlock x:Name="Notice" Grid.Row="1" Visibility="Collapsed" Foreground="{DynamicResource Accent}" Margin="0,0,0,16"/>
+      <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,28"><StackPanel x:Name="Body"/></ScrollViewer>
+    </Grid>
+  </Grid>
+</Window>
