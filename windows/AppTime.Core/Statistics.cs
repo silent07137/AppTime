@@ -27,7 +27,10 @@ public static class Statistics
         foreach (var i in data["app_identities"].Where(i=>S(i,"deviceId")==deviceId))
         {
             string id=S(i,"identityId");
-            var spans=TimeZones.Union(sessions[id].Select(s=>(N(s,"startMs"),N(s,"endMs"))));
+            var observed=sessions[id].Select(s=>(Start:N(s,"startMs"),End:N(s,"endMs")));
+            // Windows episodes have unique IDs and monotonic durations. A clock rollback can
+            // repeat a wall-clock range; unioning those distinct episodes would lose real usage.
+            var spans=device.Platform=="windows" ? observed.OrderBy(s=>s.Start).ToList() : TimeZones.Union(observed);
             foreach (var ignore in ignores[id]) spans=Subtract(spans,[(N(ignore,"startMs"),ignore["endMs"]==null ? long.MaxValue : N(ignore,"endMs"))]);
             var days=new Dictionary<DateOnly,long>();
             foreach (var span in spans)

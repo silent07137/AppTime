@@ -45,6 +45,14 @@ try
     { long start=TimeZones.Midnight(new(2026,10,2),"Asia/Shanghai")-10000; var pieces=TimeZones.Split(start,start+30000,"Asia/Shanghai").ToList(); Check(pieces.Count==2 && pieces.Sum(s=>s.End-s.Start)==30000); });
     Test("DST 23 and 25 hour days",()=>
     { string zone="America/New_York"; Check(TimeZones.Midnight(new(2026,3,9),zone)-TimeZones.Midnight(new(2026,3,8),zone)==23*3600000L); Check(TimeZones.Midnight(new(2026,11,2),zone)-TimeZones.Midnight(new(2026,11,1),zone)==25*3600000L); });
+    Test("Windows rollback keeps distinct monotonic episodes in reports",()=>
+    {
+        var c=Engine(); c.Poll(new(epoch,0,0,a)); c.Poll(new(epoch+5000,5000,0,a));
+        c.Poll(new(epoch+1000,6000,0,a)); c.Poll(new(epoch+2000,7000,0,a));
+        using var rollback=new Store(Path.Combine(root,"rollback.sqlite")); rollback.Save(c.Drain());
+        var r=Statistics.Read(rollback,rollback.LocalDeviceId); var date=TimeZones.Date(epoch,r.Device.Timezone);
+        Check(r.Total==6000 && r.Day(date)==6000 && Statistics.Hours(r,date).Sum(h=>h.Duration)==6000);
+    });
     Test("overlapping sessions are unioned",()=>Check(TimeZones.Union([(0L,100L),(50L,150L)]).Single()==(0L,150L)));
     Test("ignored range subtraction",()=>Check(Statistics.Subtract([(0L,100L)],[(30L,70L)]).Sum(s=>s.End-s.Start)==60));
     string path=Path.Combine(root,"archive.sqlite"); string local;
