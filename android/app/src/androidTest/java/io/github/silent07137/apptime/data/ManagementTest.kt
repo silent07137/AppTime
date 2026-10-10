@@ -55,6 +55,17 @@ class ManagementTest {
         repo.removeAdjustment(db.usageDao().observeAdjustments(id).first().single().adjustmentId)
         assertEquals(60_000L, db.usageDao().appDay(id, date.toString())!!.durationMs)
     }
+    @Test fun importedWindowsCorrectionUsesSourceCalendarInsteadOfPhoneTimezone() = runBlocking {
+        val dao = db.usageDao()
+        dao.insertDevice(DeviceEntity("windows-source", platform = "windows", createdAt = 0, reportTimezone = "Pacific/Kiritimati"))
+        dao.insertIdentity(IdentityEntity("windows-app", "windows-source", "current_user", "exe:test", "Test"))
+        clock = java.time.Instant.parse("2026-01-01T22:00:00Z").toEpochMilli()
+        repo().addAdjustment("windows-app", LocalDate.of(2026, 1, 2), 60_000, "source day")
+        val row = dao.observeAdjustments("windows-app").first().single()
+        assertEquals("Pacific/Kiritimati", row.timezone)
+        assertEquals(60_000L, dao.appDay("windows-app", "2026-01-02")!!.durationMs)
+        assertTrue(dao.observeDays("2026-01-01", deviceId = "device-one").first().isEmpty())
+    }
     @Test fun negativeAdjustmentsValidateAndDependentPositiveEntriesCannotBeRemoved() = runBlocking {
         val repo = repo(); repo.collect()
         val id = db.usageDao().observeApps().first().single().identityId

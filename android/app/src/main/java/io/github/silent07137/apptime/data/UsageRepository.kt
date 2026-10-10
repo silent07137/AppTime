@@ -358,7 +358,8 @@ class UsageRepository(
 
     suspend fun addAdjustment(id: String, date: LocalDate, deltaMs: Long, note: String) = mutex.withLock {
         require(deltaMs in -24 * HOUR_MS..24 * HOUR_MS && deltaMs != 0L) { "请输入 1 分钟至 24 小时的调整量" }
-        val device = requireNotNull(dao.device())
+        val owner = dao.identities().first { it.identityId == id }.deviceId
+        val device = requireNotNull(dao.observeDevices().first().firstOrNull { it.deviceId == owner })
         val zone = ZoneId.of(device.reportTimezone)
         require(!date.isAfter(Instant.ofEpochMilli(now()).atZone(zone).toLocalDate())) { "不能调整未来日期" }
         db.withTransaction {
