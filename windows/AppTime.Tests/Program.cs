@@ -63,6 +63,63 @@ try
         c.Poll(new(epoch+4000,4000,0,a)); c.Poll(new(epoch+5000,5000,0,a));
         var rows=c.Drain(); Check(rows.Sessions.Sum(s=>s.EndMs-s.StartMs)==2000 && rows.Gaps.Count==0);
     });
+    string appearancePath=Path.Combine(root,"appearance.sqlite"),appearanceId="";
+    byte[] iconPng=Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL1sAAAAASUVORK5CYII=");
+    using (var appearance=new Store(appearancePath))
+    {
+        appearance.Save(([new(Guid.NewGuid().ToString(),a,epoch,epoch+1000,"UTC",0)],[]));
+        appearanceId=Statistics.Read(appearance,appearance.LocalDeviceId).Apps.Single().Id;
+        Test("old identities acquire executable metadata without changing identity or usage",()=>
+        {
+            Check(appearance.Appearance(appearanceId)==new AppAppearance());
+            var known=a with { ExecutablePath=Path.Combine(root,"original.exe") };
+            appearance.Save(([new(Guid.NewGuid().ToString(),known,epoch+1000,epoch+2000,"UTC",0)],[]));
+            Check(appearance.Appearance(appearanceId).ExecutablePath==known.ExecutablePath);
+            Check(Statistics.Read(appearance,appearance.LocalDeviceId).Apps.Single() is { Total:2000 } app && app.Id==appearanceId);
+        });
+        Test("custom icons persist separately from collection metadata",()=>
+        {
+            appearance.SetAppIcon(appearanceId,iconPng); long version=appearance.Version;
+            appearance.SetAppIcon(appearanceId,iconPng); Check(appearance.Version==version);
+            var known=a with { ExecutablePath=Path.Combine(root,"updated.exe") };
+            appearance.Save(([new(Guid.NewGuid().ToString(),known,epoch+2000,epoch+3000,"UTC",0)],[]));
+            Check(appearance.Appearance(appearanceId).ExecutablePath==known.ExecutablePath && appearance.Appearance(appearanceId).CustomIcon!.SequenceEqual(iconPng));
+            Check(Statistics.Read(appearance,appearance.LocalDeviceId).Total==3000);
+        });
+        Test("invalid icon input leaves the prior icon and usage intact",()=>
+        {
+            foreach (var invalid in new[] { new byte[2],new byte[65537] })
+            {
+                bool failed=false; try { appearance.SetAppIcon(appearanceId,invalid); } catch (InvalidDataException) { failed=true; }
+                Check(failed && appearance.Appearance(appearanceId).CustomIcon!.SequenceEqual(iconPng));
+            }
+            bool missing=false; try { appearance.SetAppIcon(Guid.NewGuid().ToString(),iconPng); } catch (InvalidDataException) { missing=true; } Check(missing);
+        });
+        Test("portable backups exclude local executable paths and icon data",()=>
+        {
+            string file=Path.Combine(root,"appearance.atbackup"); Backup.Export(appearance,file,password); var plan=Backup.Read(file,password);
+            Check(!plan.Data.ContainsKey("app_appearance"));
+            using (var zip=new ZipArchive(new MemoryStream(Backup.Zip(plan.Data,plan.Origin)),ZipArchiveMode.Read))
+                foreach (var entry in zip.Entries)
+                {
+                    using var reader=new StreamReader(entry.Open()); string text=reader.ReadToEnd();
+                    Check(!text.Contains("executablePath") && !text.Contains("customIcon") && !text.Contains("updated.exe"));
+                }
+            using var imported=new Store(Path.Combine(root,"appearance-imported.sqlite")); imported.Merge(plan.Data);
+            Check(imported.Appearance(appearanceId)==new AppAppearance());
+            imported.SetAppIcon(appearanceId,iconPng); // Local display choices also work for imported devices.
+            Check(imported.Appearance(appearanceId).CustomIcon!.SequenceEqual(iconPng) && Statistics.Read(imported,plan.Origin).Total==3000);
+            Check(appearance.Merge(plan.Data)==0 && appearance.Appearance(appearanceId).CustomIcon!.SequenceEqual(iconPng));
+        });
+    }
+    Test("reopening preserves custom icons and restoring default preserves the executable and usage",()=>
+    {
+        using var appearance=new Store(appearancePath);
+        Check(appearance.Appearance(appearanceId).CustomIcon!.SequenceEqual(iconPng));
+        appearance.SetAppIcon(appearanceId,null); long version=appearance.Version; appearance.SetAppIcon(appearanceId,null);
+        Check(appearance.Appearance(appearanceId) is { CustomIcon:null,ExecutablePath:not null } && appearance.Version==version);
+        Check(Statistics.Read(appearance,appearance.LocalDeviceId).Total==3000);
+    });
     string managedPath=Path.Combine(root,"management.sqlite"); string managedId;
     using (var managed=new Store(managedPath))
     {

@@ -10,7 +10,7 @@
     </Border>
     <Grid Grid.Column="1" Margin="32,28,32,0">
       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-      <Grid Margin="0,0,0,26"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Orientation="Horizontal"><Button x:Name="BackButton" Content="←" Width="44" Padding="12,8" Margin="0,0,12,0" Visibility="Collapsed" Click="BackClicked"/><TextBlock x:Name="PageTitle" Text="总览" FontSize="28" FontWeight="SemiBold" VerticalAlignment="Center"/></StackPanel><ComboBox x:Name="DevicePicker" Grid.Column="1" Width="270" SelectionChanged="DeviceChanged" AutomationProperties.Name="来源设备"/></Grid>
+      <Grid Margin="0,0,0,26"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Orientation="Horizontal"><Button x:Name="BackButton" Content="←" Width="44" Padding="12,8" Margin="0,0,12,0" Visibility="Collapsed" Click="BackClicked"/><Image x:Name="TitleIcon" Width="32" Height="32" Margin="0,0,12,0" Visibility="Collapsed"/><TextBlock x:Name="PageTitle" Text="总览" FontSize="28" FontWeight="SemiBold" VerticalAlignment="Center"/></StackPanel><ComboBox x:Name="DevicePicker" Grid.Column="1" Width="270" SelectionChanged="DeviceChanged" AutomationProperties.Name="来源设备"/></Grid>
       <TextBlock x:Name="Notice" Grid.Row="1" Visibility="Collapsed" Foreground="{DynamicResource Accent}" Margin="0,0,0,16"/>
       <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,28"><StackPanel x:Name="Body"/></ScrollViewer>
     </Grid>
