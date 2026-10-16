@@ -55,7 +55,7 @@ public sealed class NativeSource
             string family=Family(pid);
             // Path is only a conservative identity clue: same-name applications are not merged.
             string key=family.Length>0 ? "pfn:"+family : "exe:"+Path.GetFileName(path).ToLowerInvariant()+":"+Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(path).ToUpperInvariant())));
-            return new(key,name.Length>512 ? name[..512] : name);
+            return new(key,name.Length>512 ? name[..512] : name,path);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or System.ComponentModel.Win32Exception) { return null; }
     }

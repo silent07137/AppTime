@@ -9,6 +9,7 @@ public record Table(string Name, string Sql, Column[] Columns, string[] Keys);
 public record Device(string Id, string Platform, string Timezone, long CreatedAt);
 public record Preference(string Category = "未分类", bool Hidden = false, bool Ignored = false, long Revision = 0);
 public record Adjustment(string Id, long DeltaMs, string Note, string Timezone);
+public record AppAppearance(string? ExecutablePath = null, byte[]? CustomIcon = null);
 public sealed class Store : IDisposable
 {
     public static readonly Table[] Tables = JsonSerializer.Deserialize<Table[]>(
@@ -37,7 +38,8 @@ public sealed class Store : IDisposable
                 "CREATE INDEX IF NOT EXISTS session_day ON sessions(identityId,startMs,endMs);" +
                 "CREATE INDEX IF NOT EXISTS session_device ON sessions(originDeviceId,startMs);" +
                 "CREATE INDEX IF NOT EXISTS history_app ON historical_buckets(identityId,startMs,endMs);" +
-                "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY NOT NULL,value TEXT NOT NULL); PRAGMA user_version=1;");
+                "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY NOT NULL,value TEXT NOT NULL);" +
+                "CREATE TABLE IF NOT EXISTS app_appearance (identityId TEXT PRIMARY KEY NOT NULL REFERENCES app_identities(identityId) ON DELETE CASCADE,executablePath TEXT,customIcon BLOB); PRAGMA user_version=1;");
             if (!staging)
             {
                 LocalDeviceId = Setting("local_device") ?? Guid.NewGuid().ToString();
@@ -49,6 +51,28 @@ public sealed class Store : IDisposable
 
     public string? Setting(string key) { lock (Gate) return Scalar("SELECT value FROM settings WHERE key=$p0", key) as string; }
     public void SetSetting(string key, string value) { lock (Gate) Run("INSERT INTO settings VALUES($p0,$p1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", key, value); }
+    // Display metadata stays on this computer; paths and icon bytes never enter portable archives.
+    public AppAppearance Appearance(string id)
+    {
+        lock (Gate)
+        {
+            var row=Rows("SELECT executablePath,customIcon FROM app_appearance WHERE identityId=$p0",id).SingleOrDefault();
+            return row==null ? new() : new(row["executablePath"] as string,row["customIcon"] as byte[]);
+        }
+    }
+    public void SetAppIcon(string id, byte[]? png)
+    {
+        if (png!=null && (png.Length is <8 or >65536 || !png.AsSpan(0,8).SequenceEqual(new byte[] {137,80,78,71,13,10,26,10})))
+            throw new InvalidDataException("图标需为不超过 64 KiB 的 PNG");
+        lock (Gate)
+        {
+            if (Scalar("SELECT identityId FROM app_identities WHERE identityId=$p0",id)==null) throw new InvalidDataException("应用档案不存在");
+            var old=Appearance(id).CustomIcon;
+            if (old==null && png==null || old!=null && png!=null && old.AsSpan().SequenceEqual(png)) return;
+            Run("INSERT INTO app_appearance(identityId,customIcon) VALUES($p0,$p1) ON CONFLICT(identityId) DO UPDATE SET customIcon=excluded.customIcon",id,png);
+            Version++;
+        }
+    }
     public List<Device> Devices() { lock (Gate) return Rows("SELECT * FROM devices ORDER BY createdAt,deviceId").Select(r => new Device(S(r,"deviceId"), S(r,"platform"), S(r,"reportTimezone"), N(r,"createdAt"))).ToList(); }
     public string LocalTimezone => Devices().Single(d => d.Id == LocalDeviceId).Timezone;
     public void ChangeTimezone(string zone)
@@ -146,6 +170,8 @@ public sealed class Store : IDisposable
                     id = Guid.NewGuid().ToString();
                     Run("INSERT INTO app_identities VALUES($p0,$p1,'current_user',$p2,$p3)", id, LocalDeviceId, session.App.Key, session.App.Name);
                 }
+                if (session.App.ExecutablePath is string path && Path.IsPathFullyQualified(path) && Path.GetExtension(path).Equals(".exe",StringComparison.OrdinalIgnoreCase))
+                    Run("INSERT INTO app_appearance(identityId,executablePath) VALUES($p0,$p1) ON CONFLICT(identityId) DO UPDATE SET executablePath=excluded.executablePath WHERE executablePath IS NOT excluded.executablePath",id,path);
                 Run("INSERT INTO sessions VALUES($p0,$p1,$p2,$p3,$p3,$p4,$p5,$p6,$p7,'windows_active_foreground','windows_foreground_poll',0,1,'partial',$p8,0) " +
                     "ON CONFLICT(sessionId) DO UPDATE SET endMs=excluded.endMs,durationMs=excluded.durationMs,revision=excluded.revision WHERE excluded.revision > sessions.revision",
                     session.Id, LocalDeviceId, id, session.StartMs, session.EndMs, session.EndMs - session.StartMs, session.Timezone, session.OffsetSeconds, session.Revision);

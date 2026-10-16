@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 namespace AppTime.Core;
 
-public record AppIdentity(string Key, string Name);
+public record AppIdentity(string Key, string Name, string? ExecutablePath = null);
 public record Sample(long UtcMs, long MonotonicMs, long IdleMs, AppIdentity? App, string? Blocked = null);
 public record Session(string Id, AppIdentity App, long StartMs, long EndMs, string Timezone, int OffsetSeconds, long Revision = 1);
 public record Gap(long StartMs, long EndMs, string Reason);

@@ -25,6 +25,7 @@ public partial class MainWindow : Window
 {
     private readonly Store store;
     private readonly Tracker tracker;
+    private readonly AppIcons icons;
     private readonly Forms.NotifyIcon tray;
     private readonly Forms.ToolStripMenuItem trayPause;
     private readonly DispatcherTimer refresh=new() { Interval=TimeSpan.FromSeconds(4) };
@@ -38,11 +39,12 @@ public partial class MainWindow : Window
     private string search="";
     private string category="全部分类",appFilter="可见应用";
     private sealed record DeviceChoice(Device Device,string Label) { public override string ToString()=>Label; }
-    private sealed record AppRow(string Id,string Name,string Category,string State,string Time);
+    private sealed record AppRow(string Id,string Name,string Category,string State,string Time,AppIcons.Value Icon)
+    { public override string ToString()=>Name+" · "+Time; }
 
     public MainWindow(Store store,Tracker tracker)
     {
-        InitializeComponent(); this.store=store; this.tracker=tracker; ApplyTheme();
+        InitializeComponent(); this.store=store; this.tracker=tracker; icons=new(store); ApplyTheme();
         string[] names=["总览","应用","趋势","设备","设置"];
         string[] glyphs=["\uE80F","\uE71D","\uE9D2","\uE770","\uE713"];
         for (int i=0;i<names.Length;i++)
@@ -130,6 +132,7 @@ public partial class MainWindow : Window
     {
         if (report==null) return;
         Body.Children.Clear(); BackButton.Visibility=page>=5 ? Visibility.Visible : Visibility.Collapsed;
+        TitleIcon.Visibility=Visibility.Collapsed;
         for (int i=0;i<nav.Count;i++) nav[i].Background=Brush(page==i ? "Tint" : "Surface");
         Notice.Visibility=Visibility.Collapsed;
         switch (page)
@@ -169,11 +172,16 @@ public partial class MainWindow : Window
     }
     private UIElement AppList(List<AppUsage> apps,double height)
     {
-        var list=new ListView { Height=Math.Min(height,Math.Max(72,apps.Count*48+38)),Margin=new Thickness(0,16,0,18),Background=Brush("Surface"),Foreground=Brush("Foreground"),BorderThickness=new Thickness(0),Padding=new Thickness(10),ItemsSource=apps.Select(a=>new AppRow(a.Id,a.Name,a.Category,a.Ignored ? "已忽略" : a.Hidden ? "已隐藏" : "",Statistics.Duration(a.Total))).ToList() };
+        var list=new ListView { Height=Math.Min(height,Math.Max(72,apps.Count*48+38)),Margin=new Thickness(0,16,0,18),Background=Brush("Surface"),Foreground=Brush("Foreground"),BorderThickness=new Thickness(0),Padding=new Thickness(10),ItemsSource=apps.Select(a=>new AppRow(a.Id,a.Name,a.Category,a.Ignored ? "已忽略" : a.Hidden ? "已隐藏" : "",Statistics.Duration(a.Total),icons.For(a.Id))).ToList() };
         VirtualizingPanel.SetIsVirtualizing(list,true); VirtualizingPanel.SetVirtualizationMode(list,VirtualizationMode.Recycling);
         ScrollViewer.SetHorizontalScrollBarVisibility(list,ScrollBarVisibility.Disabled);
         var view=new GridView();
-        foreach (var column in new[]{("应用","Name",Math.Max(170,ActualWidth-870)),("分类","Category",95d),("状态","State",75d),("累计","Time",155d)})
+        var cell=new FrameworkElementFactory(typeof(DockPanel));
+        var icon=new FrameworkElementFactory(typeof(Image)); icon.SetValue(Image.WidthProperty,28d); icon.SetValue(Image.HeightProperty,28d); icon.SetValue(Image.MarginProperty,new Thickness(0,0,12,0)); icon.SetBinding(Image.SourceProperty,icons.Binding("Icon.Source"));
+        var name=new FrameworkElementFactory(typeof(TextBlock)); name.SetBinding(TextBlock.TextProperty,new System.Windows.Data.Binding("Name")); name.SetValue(TextBlock.VerticalAlignmentProperty,VerticalAlignment.Center); name.SetValue(TextBlock.TextWrappingProperty,TextWrapping.NoWrap); name.SetValue(TextBlock.TextTrimmingProperty,TextTrimming.CharacterEllipsis);
+        cell.AppendChild(icon); cell.AppendChild(name);
+        view.Columns.Add(new GridViewColumn { Header="应用",CellTemplate=new DataTemplate { VisualTree=cell },Width=Math.Max(190,ActualWidth-870) });
+        foreach (var column in new[]{("分类","Category",95d),("状态","State",75d),("累计","Time",155d)})
             view.Columns.Add(new GridViewColumn { Header=column.Item1,DisplayMemberBinding=new System.Windows.Data.Binding(column.Item2),Width=column.Item3 });
         list.View=view;
         void Select() { if (list.SelectedItem is AppRow row) { selectedApp=row.Id; previousPage=page; page=6; Draw(true); } }
@@ -224,15 +232,20 @@ public partial class MainWindow : Window
     {
         var app=report!.Apps.SingleOrDefault(a=>a.Id==selectedApp);
         if (app==null) { page=1; Draw(false); return; }
-        PageTitle.Text=app.Name; Body.Children.Add(Metric("累计用时",app.Total,true));
+        PageTitle.Text=app.Name; TitleIcon.Visibility=Visibility.Visible; TitleIcon.DataContext=icons.For(app.Id); TitleIcon.SetBinding(Image.SourceProperty,icons.Binding(nameof(AppIcons.Value.Source)));
+        Body.Children.Add(Metric("累计用时",app.Total,true));
+        var choose=Action("更换图标",()=>ChooseIcon(app)); choose.Margin=new Thickness(0,0,12,10);
+        var reset=Action("恢复默认图标",()=>Change(()=>store.SetAppIcon(app.Id,null),"已恢复默认图标")); reset.IsEnabled=store.Appearance(app.Id).CustomIcon!=null;
+        var management=Stack(new StackPanel { Orientation=Orientation.Horizontal,Children={choose,reset} });
         if (report.Device.Id==store.LocalDeviceId)
         {
             var hidden=new CheckBox { Content="隐藏应用",IsChecked=app.Hidden,Margin=new Thickness(0,8,0,12) };
             hidden.Click+=(_,_)=> { bool value=hidden.IsChecked==true; Change(()=>store.UpdatePreference(app.Id,hidden:value),"显示设置已保存"); };
             var ignored=new CheckBox { Content="忽略采集",IsChecked=app.Ignored,ToolTip="从现在起停止记录；已有历史保留",Margin=new Thickness(0,0,0,12) };
             ignored.Click+=(_,_)=> { bool value=ignored.IsChecked==true; Change(()=>tracker.SetIgnored(app.Id,value),value ? "已停止记录此应用，历史保留" : "已恢复记录，忽略时段不会补计"); };
-            Body.Children.Add(new Expander { Header="应用管理 · "+app.Category,Margin=new Thickness(0,0,0,18),Content=Stack(Action("修改分类",()=>EditCategory(app)),hidden,ignored,Action("修正今日用时",()=>OpenDay(Today,app.Id))) });
+            management.Children.Add(Action("修改分类",()=>EditCategory(app))); management.Children.Add(hidden); management.Children.Add(ignored); management.Children.Add(Action("修正今日用时",()=>OpenDay(Today,app.Id)));
         }
+        Body.Children.Add(new Expander { Header="应用管理 · "+app.Category,Margin=new Thickness(0,0,0,18),Content=management });
         Body.Children.Add(Card(Stack(Text("最近 7 天",17),DailyChart(7,app.Id)))); Dates(app.Id);
     }
     private void Day()
@@ -243,7 +256,11 @@ public partial class MainWindow : Window
         var picker=new DatePicker { SelectedDate=selectedDay.ToDateTime(TimeOnly.MinValue),DisplayDateEnd=Today.ToDateTime(TimeOnly.MinValue),Width=180,Foreground=Brush("Foreground"),Background=Brush("Surface"),HorizontalAlignment=HorizontalAlignment.Center,Margin=new Thickness(0,0,0,14) }; AutomationProperties.SetName(picker,"统计日期");
         picker.SelectedDateChanged+=(_,_)=> { if (picker.SelectedDate is DateTime d && DateOnly.FromDateTime(d)!=selectedDay) { selectedDay=DateOnly.FromDateTime(d); Draw(true); } };
         Grid.SetColumn(picker,1); Grid.SetColumn(right,2); chooser.Children.Add(left); chooser.Children.Add(picker); chooser.Children.Add(right); Body.Children.Add(chooser);
-        if (selectedApp!=null) Body.Children.Add(Text(report!.Apps.Single(a=>a.Id==selectedApp).Name,16,"Muted"));
+        if (selectedApp!=null)
+        {
+            var identity=new StackPanel { Orientation=Orientation.Horizontal,Margin=new Thickness(0,0,0,12) }; var icon=icons.Image(selectedApp,28); icon.Margin=new Thickness(0,0,12,0); identity.Children.Add(icon);
+            var name=Text(report!.Apps.Single(a=>a.Id==selectedApp).Name,16,"Muted"); name.VerticalAlignment=VerticalAlignment.Center; identity.Children.Add(name); Body.Children.Add(identity);
+        }
         long daily=report!.Day(selectedDay,selectedApp); bool exists=report.Dates(selectedApp).Contains(selectedDay);
         Body.Children.Add(exists ? Metric("当天用时",daily,true) : Card(Text("当天暂无记录",18,"Muted")));
         if (selectedApp!=null && report.Device.Id==store.LocalDeviceId)
@@ -266,7 +283,13 @@ public partial class MainWindow : Window
             var note=new Expander { Header="分布说明",Margin=new Thickness(0,0,0,18),Content=Text("时段已记录 "+Statistics.Duration(recorded)+"。系统汇总和手动调整没有可分配的事件时段。",13,"Muted") }; Body.Children.Add(note);
         }
         var apps=report.Apps.Where(a=>(selectedApp==null || a.Id==selectedApp) && a.Days.GetValueOrDefault(selectedDay)>0).OrderByDescending(a=>a.Days.GetValueOrDefault(selectedDay));
-        foreach (var app in apps) Body.Children.Add(Action(app.Name+"                 "+Statistics.Duration(app.Days[selectedDay]),()=> { selectedApp=app.Id; Draw(true); }));
+        foreach (var app in apps)
+        {
+            var button=Action(app.Name,()=> { selectedApp=app.Id; Draw(true); });
+            var row=new DockPanel(); var icon=icons.Image(app.Id,28); icon.Margin=new Thickness(0,0,12,0); row.Children.Add(icon);
+            var duration=Text(Statistics.Duration(app.Days[selectedDay])); duration.VerticalAlignment=VerticalAlignment.Center; duration.Margin=new Thickness(12,0,0,0); DockPanel.SetDock(duration,Dock.Right); row.Children.Add(duration);
+            var name=Text(app.Name); name.TextWrapping=TextWrapping.NoWrap; name.TextTrimming=TextTrimming.CharacterEllipsis; name.VerticalAlignment=VerticalAlignment.Center; row.Children.Add(name); button.Content=row; AutomationProperties.SetName(button,app.Name+" "+duration.Text); Body.Children.Add(button);
+        }
         var timeline=new StackPanel(); int shown=0;
         long start=TimeZones.Midnight(selectedDay,report.Device.Timezone),end=TimeZones.Midnight(selectedDay.AddDays(1),report.Device.Timezone);
         foreach (var item in report.Apps.Where(a=>selectedApp==null || a.Id==selectedApp).SelectMany(a=>a.Spans.Select(s=>new { App=a,Span=s })).Where(i=>i.Span.Start<end && i.Span.End>start).OrderBy(i=>i.Span.Start).Take(200))
@@ -327,6 +350,11 @@ public partial class MainWindow : Window
         var body=Stack(Text("分类名称",16),input); var window=Editor("修改分类",body);
         body.Children.Add(Action("保存",()=> { if (string.IsNullOrWhiteSpace(input.Text)) return; window.DialogResult=true; }));
         if (window.ShowDialog()==true) { string value=input.Text; Change(()=>store.UpdatePreference(app.Id,category:value),"分类已保存"); }
+    }
+    private void ChooseIcon(AppUsage app)
+    {
+        var file=new OpenFileDialog { Title="选择图标来源",Filter="可执行程序 (*.exe)|*.exe",CheckFileExists=true,Multiselect=false };
+        if (file.ShowDialog(this)==true) { string path=file.FileName; Change(()=>icons.Choose(app.Id,path),"图标已更换"); }
     }
     private void EditAdjustment(string id,DateOnly date)
     {
@@ -404,26 +432,42 @@ public partial class MainWindow : Window
             await Task.Delay(1000); await Reload(true);
             if (report==null) throw new Exception("Report unavailable");
             // Dedicated test archive only. Synthetic rows never enter a normal user archive.
-            if (store.Snapshot()["sessions"].Count==0)
+            if (!report.Apps.Any(a=>a.Key=="selftest:editor"))
             {
                 var rows=new List<Session>();
                 for (int i=0;i<7;i++)
                 {
                     long t=TimeZones.Midnight(Today.AddDays(-i),store.LocalTimezone)+10*3600000;
                     int offset=(int)TimeZones.Find(store.LocalTimezone).GetUtcOffset(DateTimeOffset.FromUnixTimeMilliseconds(t)).TotalSeconds;
-                    rows.Add(new(Guid.NewGuid().ToString(),new AppIdentity("selftest:editor","编辑器"),t,t+(25+i*7)*60000,store.LocalTimezone,offset));
-                    rows.Add(new(Guid.NewGuid().ToString(),new AppIdentity("selftest:browser","浏览器"),t+4*3600000,t+4*3600000+(16+i*4)*60000,store.LocalTimezone,offset));
+                    rows.Add(new(Guid.NewGuid().ToString(),new AppIdentity("selftest:editor","编辑器",Environment.ProcessPath),t,t+(25+i*7)*60000,store.LocalTimezone,offset));
+                    rows.Add(new(Guid.NewGuid().ToString(),new AppIdentity("selftest:browser","浏览器",Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"explorer.exe")),t+4*3600000,t+4*3600000+(16+i*4)*60000,store.LocalTimezone,offset));
                 }
                 store.Save((rows,[])); await Reload(true);
             }
+            var iconApp=report.Apps.Single(a=>a.Key=="selftest:editor");
+            if (ReferenceEquals(await Task.Run(()=>icons.Read(iconApp.Id)),icons.Fallback)) throw new Exception("Default executable icon was not loaded");
+            string iconSource=Path.Combine(directory,"icon-source.exe");
+            File.Copy(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"explorer.exe"),iconSource,true);
+            await Task.Run(()=>icons.Choose(iconApp.Id,iconSource));
+            byte[] chosen=store.Appearance(iconApp.Id).CustomIcon!;
+            File.Delete(iconSource);
+            if (ReferenceEquals(await Task.Run(()=>icons.Read(iconApp.Id)),icons.Fallback)) throw new Exception("Custom icon did not survive removal of its source");
+            bool invalidRejected=false;
+            try { await Task.Run(()=>icons.Choose(iconApp.Id,Path.Combine(directory,"missing.exe"))); } catch (InvalidDataException) { invalidRejected=true; }
+            if (!invalidRejected || !store.Appearance(iconApp.Id).CustomIcon!.SequenceEqual(chosen)) throw new Exception("Invalid icon choice changed the saved icon");
+            var truncated=new byte[] {137,80,78,71,13,10,26,10}; store.SetAppIcon(iconApp.Id,truncated);
+            if (!ReferenceEquals(await Task.Run(()=>icons.Read(iconApp.Id)),icons.Fallback)) throw new Exception("Unreadable icon did not use the fallback");
+            store.SetAppIcon(iconApp.Id,null);
+            if (ReferenceEquals(await Task.Run(()=>icons.Read(iconApp.Id)),icons.Fallback)) throw new Exception("Restoring the default executable icon failed");
+            if (!ReferenceEquals(await Task.Run(()=>icons.Read("missing-identity")),icons.Fallback)) throw new Exception("Missing executable did not use the fallback");
             for (int i=0;i<5;i++) { page=i; Draw(false); UpdateLayout(); await Task.Delay(100); Render(Path.Combine(directory,$"page-{i}.png")); }
             selectedDay=Today; page=5; Draw(false); UpdateLayout(); Render(Path.Combine(directory,"day.png"));
             selectedApp=report.Apps.First().Id; page=6; Draw(false);
             foreach (var expander in Body.Children.OfType<Expander>()) expander.IsExpanded=true;
-            UpdateLayout(); Render(Path.Combine(directory,"app-management.png"));
+            UpdateLayout(); await Task.Delay(100); Render(Path.Combine(directory,"app-management.png"));
             page=5; Draw(false);
             foreach (var expander in Body.Children.OfType<Expander>()) expander.IsExpanded=true;
-            UpdateLayout(); Render(Path.Combine(directory,"corrections.png")); selectedApp=null;
+            UpdateLayout(); await Task.Delay(100); Render(Path.Combine(directory,"corrections.png")); selectedApp=null;
             Activate(); await Task.Delay(300);
             var native=new NativeSource().Read();
             var adapter=new NativeSource(); var self=adapter.ReadWindow(new System.Windows.Interop.WindowInteropHelper(this).Handle);
@@ -439,7 +483,7 @@ public partial class MainWindow : Window
             store.SetSetting("theme","light"); ApplyTheme(); Draw(false); UpdateLayout(); Render(Path.Combine(directory,"light.png"));
             store.SetSetting("theme","dark"); ApplyTheme(); page=4; Draw(false); UpdateLayout(); var scroller=(ScrollViewer)Body.Parent; scroller.ScrollToEnd(); UpdateLayout(); Render(Path.Combine(directory,"about.png"));
             Hide(); var process=Process.GetCurrentProcess(); var cpu=process.TotalProcessorTime; var clock=Stopwatch.StartNew(); await Task.Delay(15000); process.Refresh();
-            File.WriteAllText(Path.Combine(directory,"smoke.json"),JsonSerializer.Serialize(new { pages=8,nativeWindowIdentity=true,foregroundSamplingVerified=foregroundVerified && liveMs>0,liveForegroundMilliseconds=liveMs,sessions=data["sessions"].Count,workingSetBytes=process.WorkingSet64,cpuPercent=(process.TotalProcessorTime-cpu).TotalMilliseconds/clock.Elapsed.TotalMilliseconds*100,window=new { width=ActualWidth,height=ActualHeight } }));
+            File.WriteAllText(Path.Combine(directory,"smoke.json"),JsonSerializer.Serialize(new { pages=8,applicationIconsVerified=true,nativeWindowIdentity=true,foregroundSamplingVerified=foregroundVerified && liveMs>0,liveForegroundMilliseconds=liveMs,sessions=data["sessions"].Count,workingSetBytes=process.WorkingSet64,cpuPercent=(process.TotalProcessorTime-cpu).TotalMilliseconds/clock.Elapsed.TotalMilliseconds*100,window=new { width=ActualWidth,height=ActualHeight } }));
             exiting=true; refresh.Stop(); tray.Dispose(); Close(); Application.Current.Shutdown();
         }
         catch (Exception e) { File.WriteAllText(Path.Combine(directory,"smoke-error.txt"),e.ToString()); Application.Current.Shutdown(1); }
